@@ -18,5 +18,17 @@ frappe.ui.form.on("POS Profile", {
 				}
 			},
 		});
+
+		frappe.ui.form.on("POS Profile", {
+    		refresh: function(frm) {
+			frm.set_query("print_format", function() {
+				return {
+					filters: [
+						["doc_type", "in", ["POS Invoice", "Sales Invoice"]]
+					]
+				};
+			});
+		},
+		});
 	},
 });
