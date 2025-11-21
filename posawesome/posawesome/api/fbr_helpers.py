@@ -1,6 +1,7 @@
 # apps/posawesome/posawesome/api/fbr_helpers.py
 import frappe
 
+
 @frappe.whitelist()
 def is_fbr_installed():
     """

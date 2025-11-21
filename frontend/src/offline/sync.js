@@ -7,76 +7,72 @@ import { updateLocalStock } from "./stock.js";
 let invoiceSyncInProgress = false;
 
 export async function saveOfflineInvoice(entry) {
-    console.log("Attempting to save offline invoice", entry);
+	console.log("Attempting to save offline invoice", entry);
 
-    // Validate items
-    if (!entry.invoice || !Array.isArray(entry.invoice.items) || !entry.invoice.items.length) {
-        throw new Error("Cart is empty. Add items before saving.");
-    }
+	// Validate items
+	if (!entry.invoice || !Array.isArray(entry.invoice.items) || !entry.invoice.items.length) {
+		throw new Error("Cart is empty. Add items before saving.");
+	}
 
-    const key = "offline_invoices";
-    const entries = memory.offline_invoices;
+	const key = "offline_invoices";
+	const entries = memory.offline_invoices;
 
-    let cleanEntry;
-    try {
-        cleanEntry = JSON.parse(JSON.stringify(entry));
-    } catch (e) {
-        console.error("Failed to serialize offline invoice", e);
-        throw e;
-    }
+	let cleanEntry;
+	try {
+		cleanEntry = JSON.parse(JSON.stringify(entry));
+	} catch (e) {
+		console.error("Failed to serialize offline invoice", e);
+		throw e;
+	}
 
-    console.log("Saving offline invoice", cleanEntry);
-    console.log("Invoice doc:", cleanEntry.invoice);
+	console.log("Saving offline invoice", cleanEntry);
+	console.log("Invoice doc:", cleanEntry.invoice);
 
-    //  CHECK IF FBR APP IS INSTALLED VIA SERVER FUNCTION
-    let fbr_installed = false;
-    try {
-        const r = await frappe.call({
-            method: "posawesome.posawesome.api.fbr_helpers.is_fbr_installed"
-        });
-        fbr_installed = r.message;
-    } catch (e) {
-        console.warn("Could not check FBR installation, skipping FBR call", e);
-    }
+	//  CHECK IF FBR APP IS INSTALLED VIA SERVER FUNCTION
+	let fbr_installed = false;
+	try {
+		const r = await frappe.call({
+			method: "posawesome.posawesome.api.fbr_helpers.is_fbr_installed",
+		});
+		fbr_installed = r.message;
+	} catch (e) {
+		console.warn("Could not check FBR installation, skipping FBR call", e);
+	}
 
-    if (fbr_installed) {
-        console.log("FBR app detected → sending invoice to FBR");
+	if (fbr_installed) {
+		console.log("FBR app detected → sending invoice to FBR");
 
-        frappe.call({
-            method: "fbr_fiscal_bridge.fbr_fiscal_bridge.api.fbr_fiscal_component.send_offline_invoice",
-            args: { invoice: JSON.stringify(cleanEntry.invoice) },
-            callback(r) {
-                if (r.message?.InvoiceNumber) {
-                    cleanEntry.invoice.custom_fbr_fiscal_invoice_number = r.message.InvoiceNumber;
-                    console.log("FBR Invoice Number:", r.message.InvoiceNumber);
-                }
-            },
-            error(err) {
-                console.error("Failed to send invoice to FBR", err);
-            },
-        });
-    } else {
-        console.log("FBR Fiscal Bridge NOT installed → Skipping FBR Call (Normal Offline Behavior)");
-    }
+		frappe.call({
+			method: "fbr_fiscal_bridge.fbr_fiscal_bridge.api.fbr_fiscal_component.send_offline_invoice",
+			args: { invoice: JSON.stringify(cleanEntry.invoice) },
+			callback(r) {
+				if (r.message?.InvoiceNumber) {
+					cleanEntry.invoice.custom_fbr_fiscal_invoice_number = r.message.InvoiceNumber;
+					console.log("FBR Invoice Number:", r.message.InvoiceNumber);
+				}
+			},
+			error(err) {
+				console.error("Failed to send invoice to FBR", err);
+			},
+		});
+	} else {
+		console.log("FBR Fiscal Bridge NOT installed → Skipping FBR Call (Normal Offline Behavior)");
+	}
 
+	//  NORMAL OFFLINE SAVE
+	entries.push(cleanEntry);
 
-    //  NORMAL OFFLINE SAVE
-    entries.push(cleanEntry);
+	if (entries.length > MAX_QUEUE_ITEMS) {
+		entries.splice(0, entries.length - MAX_QUEUE_ITEMS);
+	}
 
-    if (entries.length > MAX_QUEUE_ITEMS) {
-        entries.splice(0, entries.length - MAX_QUEUE_ITEMS);
-    }
+	memory.offline_invoices = entries;
+	persist(key, memory.offline_invoices);
 
-    memory.offline_invoices = entries;
-    persist(key, memory.offline_invoices);
-
-    if (entry.invoice?.items) {
-        updateLocalStock(entry.invoice.items);
-    }
+	if (entry.invoice?.items) {
+		updateLocalStock(entry.invoice.items);
+	}
 }
-
-
-
 
 export function isOffline() {
 	// Use cached data when running offline
