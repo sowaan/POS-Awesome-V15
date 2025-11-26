@@ -5,72 +5,129 @@ import { updateLocalStock } from "./stock.js";
 // Flag to avoid concurrent invoice syncs which can cause duplicate submissions
 let invoiceSyncInProgress = false;
 
+// Save offline invoice with proper fiscal payload
 export async function saveOfflineInvoice(entry) {
-	console.log("Attempting to save offline invoice", entry);
+    console.log("Attempting to save offline invoice", entry);
 
-	// Validate items
-	if (!entry.invoice || !Array.isArray(entry.invoice.items) || !entry.invoice.items.length) {
-		throw new Error("Cart is empty. Add items before saving.");
-	}
+    // Validate items
+    if (!entry.invoice || !Array.isArray(entry.invoice.items) || !entry.invoice.items.length) {
+        throw new Error("Cart is empty. Add items before saving.");
+    }
 
-	const key = "offline_invoices";
-	const entries = memory.offline_invoices;
+    const key = "offline_invoices";
+    const entries = memory.offline_invoices || [];
 
-	let cleanEntry;
-	try {
-		cleanEntry = JSON.parse(JSON.stringify(entry));
-	} catch (e) {
-		console.error("Failed to serialize offline invoice", e);
-		throw e;
-	}
+    let cleanEntry;
+    try {
+        cleanEntry = JSON.parse(JSON.stringify(entry));
+    } catch (e) {
+        console.error("Failed to serialize offline invoice", e);
+        throw e;
+    }
 
-	console.log("Saving offline invoice", cleanEntry);
-	console.log("Invoice doc:", cleanEntry.invoice);
+    console.log("Saving offline invoice", cleanEntry);
+    console.log("Invoice doc:", cleanEntry.invoice);
 
-	//  CHECK IF FBR APP IS INSTALLED VIA SERVER FUNCTION
-	let fbr_installed = false;
-	try {
-		const r = await frappe.call({
-			method: "posawesome.posawesome.api.fbr_helpers.is_fbr_installed",
-		});
-		fbr_installed = r.message;
-	} catch (e) {
-		console.warn("Could not check FBR installation, skipping FBR call", e);
-	}
+    // Build fiscal payload
+    let fiscalPayload = {};
+    try {
+        const invoice = cleanEntry.invoice;
+		const posID = invoice.pos_profile?.custom_pos_id || "110014";
+        const totalTaxes = parseFloat(invoice.total_taxes_and_charges || 0);
+        const netTotal = parseFloat(invoice.net_total || invoice.grand_total || 0);
+        const taxRate = netTotal ? Math.round((totalTaxes / netTotal) * 100) : 0;
 
-	if (fbr_installed) {
-		console.log("FBR app detected → sending invoice to FBR");
+        let totalQuantity = 0;
+        const items = invoice.items.map(item => {
+            const rateAfterDiscount = parseFloat(item.rate || 0) * (1 - ((parseFloat(invoice.additional_discount_percentage) || 0) / 100));
+            const amountAfterDiscount = parseFloat(item.qty || 0) * rateAfterDiscount;
+            const taxCharged = amountAfterDiscount * taxRate / 100;
 
-		frappe.call({
-			method: "fbr_fiscal_bridge.fbr_fiscal_bridge.api.fbr_fiscal_component.send_offline_invoice",
-			args: { invoice: JSON.stringify(cleanEntry.invoice) },
-			callback(r) {
-				if (r.message?.InvoiceNumber) {
-					cleanEntry.invoice.custom_fbr_fiscal_invoice_number = r.message.InvoiceNumber;
-					console.log("FBR Invoice Number:", r.message.InvoiceNumber);
-				}
-			},
-			error(err) {
-				console.error("Failed to send invoice to FBR", err);
-			},
-		});
-	} else {
-		console.log("FBR Fiscal Bridge NOT installed → Skipping FBR Call (Normal Offline Behavior)");
-	}
+            totalQuantity += parseFloat(item.qty || 0);
+			const pctCode = item.custom_pct_code || "11001010";
+			
 
-	//  NORMAL OFFLINE SAVE
-	entries.push(cleanEntry);
+            return {
+                ItemCode: item.item_code,
+                ItemName: item.item_name,
+                Quantity: parseFloat(item.qty || 0),
+				PCTCode: pctCode,
+                TaxRate: taxRate,
+                SaleValue: rateAfterDiscount,
+                TotalAmount: amountAfterDiscount,
+                TaxCharged: taxCharged,
+                Discount: 0.0,
+                FurtherTax: 0.0,
+                InvoiceType: 2,
+                RefUSIN: null
+            };
+        });
 
-	if (entries.length > MAX_QUEUE_ITEMS) {
-		entries.splice(0, entries.length - MAX_QUEUE_ITEMS);
-	}
+        fiscalPayload = {
+            InvoiceNumber: "",
+            POSID: posID,
+            USIN: "SI-TEST-001",
+            DateTime: `${invoice.posting_date || new Date().toISOString().split("T")[0]} ${invoice.posting_time || "00:00:00"}`,
+            BuyerName: invoice.customer || "Walkin",
+            BuyerNTN: invoice.customer_ntn || "",
+            TotalBillAmount: parseFloat(invoice.grand_total || 0),
+            TotalQuantity: totalQuantity,
+            TotalSaleValue: parseFloat(invoice.net_total || 0),
+            TotalTaxCharged: totalTaxes,
+            Discount: 0.0,
+            FurtherTax: 0.0,
+            PaymentMode: 1,
+            RefUSIN: null,
+            InvoiceType: 1,
+            Items: items
+        };
 
-	memory.offline_invoices = entries;
-	persist(key, memory.offline_invoices);
+        console.log("Fiscal payload ready:", fiscalPayload);
 
-	if (entry.invoice?.items) {
-		updateLocalStock(entry.invoice.items);
-	}
+        // Call Local Fiscal Proxy
+        try {
+            const res = await fetch("http://localhost:8525/api/get_fiscal_invoice", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(fiscalPayload)
+            });
+
+            let data;
+            try {
+                data = await res.json();
+            } catch (e) {
+                console.error("Fiscal proxy returned invalid JSON:", await res.text());
+                data = { status: "error", message: "Invalid JSON from fiscal proxy" };
+            }
+
+            if (data.status === "success" && data.fiscal?.InvoiceNumber) {
+                cleanEntry.invoice.custom_fbr_fiscal_invoice_number = data.fiscal.InvoiceNumber;
+                console.log("Fiscal Invoice Number:", data.fiscal.InvoiceNumber);
+            } else {
+                console.error("Fiscal Error:", data.message || data);
+            }
+
+        } catch (err) {
+            console.error("Cannot reach Local Fiscal Proxy (is proxy.py running?)", err);
+        }
+
+    } catch (err) {
+        console.error("Error building fiscal payload:", err);
+    }
+
+    // Normal offline save
+    entries.push(cleanEntry);
+    if (entries.length > MAX_QUEUE_ITEMS) {
+        entries.splice(0, entries.length - MAX_QUEUE_ITEMS);
+    }
+    memory.offline_invoices = entries;
+    persist(key, memory.offline_invoices);
+
+    if (entry.invoice?.items) {
+        updateLocalStock(entry.invoice.items);
+    }
+
+    console.log("Offline invoice saved successfully.");
 }
 
 export function isOffline() {
