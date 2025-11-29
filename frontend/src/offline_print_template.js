@@ -43,121 +43,137 @@ function computePaidAmount(doc) {
 	return paymentsTotal || base;
 }
 
-function defaultOfflineHTML(invoice, terms = "") {
-	if (!invoice) return "";
+import kjua from 'kjua';
 
-	const itemsRows = (invoice.items || [])
-		.map((it) => {
-			const sn = it.serial_no
-				? `<div class="serial">SR.No: ${it.serial_no.replace(/\n/g, ", ")}</div>`
-				: "";
-			const marker =
-				invoice.posa_show_custom_name_marker_on_print && it.name_overridden ? " (custom)" : "";
-			return `<tr>
-                <td>${it.item_code}${
-					it.item_name && it.item_name !== it.item_code
-						? `<div class="item-name">${it.item_name}${marker}</div>`
-						: ""
-				}${sn}</td>
-                <td class="qty">${it.qty} ${it.uom || ""}</td>
-                <td class="rate">${it.rate}</td>
-                <td class="amount">${it.amount}</td>
-            </tr>`;
-		})
-		.join("");
-
-	const taxesRows = (invoice.taxes || [])
-		.map(
-			(row) => `<tr>
-                <td style="width:60%">${row.description}@${row.rate}%</td>
-                <td style="width:40%; text-align:right;">${row.tax_amount}</td>
-            </tr>`,
-		)
-		.join("");
-
-	const discountRow = invoice.discount_amount
-		? `<tr>
-                <td style="width:60%">Discount</td>
-                <td style="width:40%; text-align:right;">${invoice.discount_amount}</td>
-            </tr>`
-		: "";
-
-	const changeRow = invoice.change_amount
-		? `<tr>
-                <td style="width:60%">Change Amount</td>
-                <td style="width:40%; text-align:right;">${invoice.change_amount}</td>
-            </tr>`
-		: "";
-
-	const termsSection = terms
-		? `<div class="terms"><strong>Terms & Conditions</strong><div>${terms}</div></div>`
-		: "";
-
-	const paidAmount = computePaidAmount(invoice);
-
-	return `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Invoice ${invoice.name || ""}</title>
-    <style>
-        body { font-family: Arial, sans-serif; width: 80mm; margin: 0 auto; padding: 5mm; }
-        .header { text-align: center; }
-        .header h2 { margin: 0; }
-        .info { margin-bottom: 4px; }
-        .info div { font-size: 12px; line-height: 1.2; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { font-size: 12px; padding: 4px 0; border-bottom: 1px dashed #ccc; }
-        th { text-align: left; }
-        td.qty, td.rate, td.amount { text-align: right; }
-        table.totals td { border-bottom: none; }
-        .terms { margin-top: 8px; font-size: 10px; }
-        .footer { text-align: center; margin-top: 8px; font-size: 11px; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h2>${invoice.company || "Invoice"}</h2>
-        <p><strong>${invoice.is_duplicate ? "Duplicate" : "Original"}</strong></p>
-    </div>
-    <div class="info">
-        <div><strong>Invoice:</strong> ${invoice.name || ""}</div>
-        <div><strong>Date:</strong> ${invoice.posting_date || ""} ${invoice.posting_time || ""}</div>
-        <div><strong>Customer:</strong> ${invoice.customer_name || invoice.customer || ""}</div>
-        <div><strong>Mobile:</strong> ${invoice.contact_mobile || ""}</div>
-        <div><strong>Additional Note:</strong> ${invoice.posa_notes || ""}</div>
-    </div>
-    <table class="items">
-        <thead>
-            <tr>
-                <th style="width:40%">Item</th>
-                <th style="width:20%; text-align:right;">Qty</th>
-                <th style="width:20%; text-align:right;">Rate</th>
-                <th style="width:20%; text-align:right;">Amt</th>
-            </tr>
-        </thead>
-        <tbody>${itemsRows}</tbody>
-    </table>
-    <table class="totals">
-        <tbody>
-            ${taxesRows}
-            ${discountRow}
-            <tr>
-                <td style="width:60%"><strong>Total</strong></td>
-                <td style="width:40%; text-align:right;">${invoice.grand_total}</td>
-            </tr>
-            <tr>
-                <td style="width:60%">Paid</td>
-                <td style="width:40%; text-align:right;">${paidAmount}</td>
-            </tr>
-            ${changeRow}
-        </tbody>
-    </table>
-    ${termsSection}
-    <div class="footer">Thank you, please visit again.</div>
-</body>
-</html>`;
+function generateQRCodeSVG(data) {
+    return kjua({
+        render: 'svg',
+        text: data,
+        size: 150,
+        fill: '#000',
+        back: '#fff',
+        rounded: 0,
+        quiet: 0
+    }).outerHTML;
 }
+
+export function defaultOfflineHTML(invoice, terms = "") {
+    if (!invoice) return "";
+
+    const fbrNumber =
+        invoice.custom_fbr_fiscal_invoice_number ||
+        invoice.custom_fbr_invoice_no ||
+        invoice.fiscal_invoice_number ||
+        invoice.InvoiceNumber ||
+        "";
+
+    const qrSVG = fbrNumber ? generateQRCodeSVG(fbrNumber) : "";
+
+    const itemsRows = (invoice.items || [])
+    .map((it, i) => {
+        const marker = invoice.posa_show_custom_name_marker_on_print && it.name_overridden ? " (custom)" : "";
+        const sn = it.serial_no ? `<div class="serial">SR.No: ${it.serial_no.replace(/\n/g, ", ")}</div>` : "";
+	
+        return `
+            <!-- Heading Row (ONCE) -->
+            ${i === 0 ? `
+            <tr class="heading-row">
+                <th width="20%" style="padding:0px !important; border:none;">Item</th>
+				<th width="10%" style="padding:0px !important; border:none;" class="text-right">Price</th>
+                <th width="10%" style="padding:0px !important; border:none;" class="text-right">Dis</th>
+				<th width="10%" style="padding:0px !important; border:none;" class="text-right">Qty</th>
+                <th width="10%" style="padding:0px !important; border:none;" class="text-right">Rate</th>
+                <th width="10%" style="padding:0px !important; border:none;" class="text-right">Amount</th>
+            </tr>
+            ` : ""}
+
+            <!-- Item name full row -->
+            <tr>
+                <td colspan="4" style="padding:0px !important; border:none; font-weight:bold;">
+                    ${it.item_name || it.item_code}${marker}${sn}
+                </td>
+            </tr>
+
+            <!-- Row with Qty, Rate, Amount -->
+            <tr>
+                <td style="padding:0px !important; border:none;"></td>
+				<td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.price_list_rate}</td>
+				<td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.discount_amount}</td>
+                <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.qty}</td>
+                <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.rate}</td>
+                <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.amount}</td>
+            </tr>
+        `;
+    })
+    .join("");
+	const taxRate = invoice.taxes?.length ? invoice.taxes[0].rate : 0;
+
+    return `<!DOCTYPE html>
+		<html>
+		<head>
+		<meta charset="UTF-8">
+		<title>Invoice</title>
+		<style>
+		body { font-family: Arial, sans-serif; font-size: 12px; }
+		.details div { margin-bottom: 4px; }
+		table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+		th, td { 
+			padding: 6px; 
+			text-align: left; 
+			border: none !important;      /* Removes all borders */
+		}
+		.item-row { font-weight: bold; padding-top: 10px; }
+		.sub-row td { padding-left: 15px; font-size: 11px; }
+		.totals td { text-align: right; padding: 4px; border: none !important; }
+		.footer { text-align: center; margin-top: 20px; font-size: 10px; }
+		.qr-block { text-align: center; margin: 15px 0; }
+		.qr-block svg { width: 150px; height: 150px; }
+		</style>
+		</head>
+		<body>
+
+		<div style="text-align:center; margin-bottom: 20px;">
+			<h2>${invoice.company || 'Invoice'}</h2>
+			${qrSVG ? `<div class="qr-block">${qrSVG}</div>` : ''}
+			${fbrNumber ? `<div><strong>FBR No:</strong> ${fbrNumber}</div>` : ''}
+		</div>
+
+		<div class="details">
+			<div><strong>Invoice #:</strong> ${invoice.name}</div>
+			<div><strong>Customer:</strong> ${invoice.customer || 'Walk-in'}</div>
+			<div><strong>Date:</strong> ${invoice.posting_date}</div>
+		</div>
+
+		<table>
+		<tbody>
+		${itemsRows}
+		</tbody>
+		</table>
+
+		<table class="totals">
+		<tr><td style="text-align:left">Net Total:</td><td>${invoice.total}</td></tr>
+		<tr><td style="text-align:left">GST @${taxRate}:</td><td>${invoice.total_taxes_and_charges}</td></tr>
+		<tr><td style="text-align:left">Discount:</td><td>${invoice.discount_amount || 0}</td></tr>
+		<tr><td style="text-align:left"><strong>Grand Total:</strong></td><td><strong>${invoice.grand_total}</strong></td></tr>
+		<tr><td style="text-align:left">Paid:</td><td>${invoice.paid_amount}</td></tr>
+		<tr><td style="text-align:left">Qty Total:</td><td>${invoice.total_qty}</td></tr>
+		</table>
+
+		<div class="footer">
+			Thank you for your purchase!<br>
+			Powered by SowaanERP
+		</div>
+
+		<div style="text-align:center; margin-top:15px;">
+			<img src="/assets/posawesome/images/image.png" style="width:140px; height:auto;">
+		</div>
+
+		</body>
+		</html>`;
+}
+
+
+
 
 export default async function renderOfflineInvoiceHTML(invoice) {
 	if (!invoice) return "";
