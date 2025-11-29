@@ -6,7 +6,7 @@ import renderOfflineInvoiceHTML from "../offline_print_template.js";
 
 // Add this helper function at the top of your file (or before saveOfflineInvoice)
 function deepCloneSerializable(obj) {
-	if (obj === null || typeof obj !== 'object') {
+	if (obj === null || typeof obj !== "object") {
 		return obj; // Return primitives as-is
 	}
 	if (Array.isArray(obj)) {
@@ -17,7 +17,7 @@ function deepCloneSerializable(obj) {
 		if (obj.hasOwnProperty(key)) {
 			const value = obj[key];
 			// Skip functions, undefined, and other non-serializable types
-			if (typeof value !== 'function' && value !== undefined) {
+			if (typeof value !== "function" && value !== undefined) {
 				cloned[key] = deepCloneSerializable(value);
 			}
 		}
@@ -52,7 +52,7 @@ async function printOfflineInvoice(invoice, fiscalPayload) {
 			let pending = 0;
 
 			// Count only unloaded images
-			[...imgs].forEach(img => {
+			[...imgs].forEach((img) => {
 				if (!img.complete) {
 					pending++;
 					img.onload = img.onerror = () => {
@@ -80,8 +80,6 @@ async function printOfflineInvoice(invoice, fiscalPayload) {
 		};
 	});
 }
-
-
 
 export async function saveOfflineInvoice(entry, print = false) {
 	console.log("Attempting to save offline invoice", entry);
@@ -114,10 +112,12 @@ export async function saveOfflineInvoice(entry, print = false) {
 		const taxRate = netTotal ? Math.round((totalTaxes / netTotal) * 100) : 0;
 
 		let totalQuantity = 0;
-		const items = invoice.items.map(item => {
-			const rateAfterDiscount = parseFloat(item.rate || 0) * (1 - ((parseFloat(invoice.additional_discount_percentage) || 0) / 100));
+		const items = invoice.items.map((item) => {
+			const rateAfterDiscount =
+				parseFloat(item.rate || 0) *
+				(1 - (parseFloat(invoice.additional_discount_percentage) || 0) / 100);
 			const amountAfterDiscount = parseFloat(item.qty || 0) * rateAfterDiscount;
-			const taxCharged = amountAfterDiscount * taxRate / 100;
+			const taxCharged = (amountAfterDiscount * taxRate) / 100;
 
 			totalQuantity += parseFloat(item.qty || 0);
 			const pctCode = item.custom_pct_code || "11001010";
@@ -134,7 +134,7 @@ export async function saveOfflineInvoice(entry, print = false) {
 				Discount: 0.0,
 				FurtherTax: 0.0,
 				InvoiceType: 2,
-				RefUSIN: null
+				RefUSIN: null,
 			};
 		});
 
@@ -154,7 +154,7 @@ export async function saveOfflineInvoice(entry, print = false) {
 			PaymentMode: 1,
 			RefUSIN: null,
 			InvoiceType: 1,
-			Items: items
+			Items: items,
 		};
 
 		console.log("Fiscal payload ready:", fiscalPayload);
@@ -164,7 +164,7 @@ export async function saveOfflineInvoice(entry, print = false) {
 			const res = await fetch("http://localhost:8525/api/get_fiscal_invoice", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(fiscalPayload)
+				body: JSON.stringify(fiscalPayload),
 			});
 
 			let data;
@@ -187,11 +187,9 @@ export async function saveOfflineInvoice(entry, print = false) {
 			} else {
 				console.error("Fiscal Error:", data.message || data);
 			}
-
 		} catch (err) {
 			console.error("Cannot reach Local Fiscal Proxy (is proxy.py running?)", err);
 		}
-
 	} catch (err) {
 		console.error("Error building fiscal payload:", err);
 	}

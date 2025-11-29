@@ -43,40 +43,45 @@ function computePaidAmount(doc) {
 	return paymentsTotal || base;
 }
 
-import kjua from 'kjua';
+import kjua from "kjua";
 
 function generateQRCodeSVG(data) {
-    return kjua({
-        render: 'svg',
-        text: data,
-        size: 150,
-        fill: '#000',
-        back: '#fff',
-        rounded: 0,
-        quiet: 0
-    }).outerHTML;
+	return kjua({
+		render: "svg",
+		text: data,
+		size: 150,
+		fill: "#000",
+		back: "#fff",
+		rounded: 0,
+		quiet: 0,
+	}).outerHTML;
 }
 
 export function defaultOfflineHTML(invoice, terms = "") {
-    if (!invoice) return "";
+	if (!invoice) return "";
 
-    const fbrNumber =
-        invoice.custom_fbr_fiscal_invoice_number ||
-        invoice.custom_fbr_invoice_no ||
-        invoice.fiscal_invoice_number ||
-        invoice.InvoiceNumber ||
-        "";
+	const fbrNumber =
+		invoice.custom_fbr_fiscal_invoice_number ||
+		invoice.custom_fbr_invoice_no ||
+		invoice.fiscal_invoice_number ||
+		invoice.InvoiceNumber ||
+		"";
 
-    const qrSVG = fbrNumber ? generateQRCodeSVG(fbrNumber) : "";
+	const qrSVG = fbrNumber ? generateQRCodeSVG(fbrNumber) : "";
 
-    const itemsRows = (invoice.items || [])
-    .map((it, i) => {
-        const marker = invoice.posa_show_custom_name_marker_on_print && it.name_overridden ? " (custom)" : "";
-        const sn = it.serial_no ? `<div class="serial">SR.No: ${it.serial_no.replace(/\n/g, ", ")}</div>` : "";
-	
-        return `
+	const itemsRows = (invoice.items || [])
+		.map((it, i) => {
+			const marker =
+				invoice.posa_show_custom_name_marker_on_print && it.name_overridden ? " (custom)" : "";
+			const sn = it.serial_no
+				? `<div class="serial">SR.No: ${it.serial_no.replace(/\n/g, ", ")}</div>`
+				: "";
+
+			return `
             <!-- Heading Row (ONCE) -->
-            ${i === 0 ? `
+            ${
+				i === 0
+					? `
             <tr class="heading-row">
                 <th width="20%" style="padding:0px !important; border:none;">Item</th>
 				<th width="10%" style="padding:0px !important; border:none;" class="text-right">Price</th>
@@ -85,7 +90,9 @@ export function defaultOfflineHTML(invoice, terms = "") {
                 <th width="10%" style="padding:0px !important; border:none;" class="text-right">Rate</th>
                 <th width="10%" style="padding:0px !important; border:none;" class="text-right">Amount</th>
             </tr>
-            ` : ""}
+            `
+					: ""
+			}
 
             <!-- Item name full row -->
             <tr>
@@ -104,11 +111,11 @@ export function defaultOfflineHTML(invoice, terms = "") {
                 <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.amount}</td>
             </tr>
         `;
-    })
-    .join("");
+		})
+		.join("");
 	const taxRate = invoice.taxes?.length ? invoice.taxes[0].rate : 0;
 
-    return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 		<html>
 		<head>
 		<meta charset="UTF-8">
@@ -133,14 +140,14 @@ export function defaultOfflineHTML(invoice, terms = "") {
 		<body>
 
 		<div style="text-align:center; margin-bottom: 20px;">
-			<h2>${invoice.company || 'Invoice'}</h2>
-			${qrSVG ? `<div class="qr-block">${qrSVG}</div>` : ''}
-			${fbrNumber ? `<div><strong>FBR No:</strong> ${fbrNumber}</div>` : ''}
+			<h2>${invoice.company || "Invoice"}</h2>
+			${qrSVG ? `<div class="qr-block">${qrSVG}</div>` : ""}
+			${fbrNumber ? `<div><strong>FBR No:</strong> ${fbrNumber}</div>` : ""}
 		</div>
 
 		<div class="details">
 			<div><strong>Invoice #:</strong> ${invoice.name}</div>
-			<div><strong>Customer:</strong> ${invoice.customer || 'Walk-in'}</div>
+			<div><strong>Customer:</strong> ${invoice.customer || "Walk-in"}</div>
 			<div><strong>Date:</strong> ${invoice.posting_date}</div>
 		</div>
 
@@ -171,9 +178,6 @@ export function defaultOfflineHTML(invoice, terms = "") {
 		</body>
 		</html>`;
 }
-
-
-
 
 export default async function renderOfflineInvoiceHTML(invoice) {
 	if (!invoice) return "";

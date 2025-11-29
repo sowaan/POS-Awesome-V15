@@ -727,7 +727,6 @@ import {
 import renderOfflineInvoiceHTML from "../../../offline_print_template";
 import { silentPrint } from "../../plugins/print.js";
 
-
 export default {
 	// Using format mixin for shared formatting methods
 	mixins: [format],
@@ -1317,8 +1316,9 @@ export default {
 
 					// Only launch print asynchronously without blocking the flow
 					if (print) {
-						this.print_offline_invoice(this.invoice_doc)
-							.catch(err => console.error("Print failed:", err));
+						this.print_offline_invoice(this.invoice_doc).catch((err) =>
+							console.error("Print failed:", err),
+						);
 					}
 
 					// Clear invoice and reset UI
@@ -1329,7 +1329,6 @@ export default {
 					vm.loading = false;
 
 					return;
-
 				} catch (error) {
 					vm.eventBus.emit("show_message", {
 						title: __("Cannot Save Offline Invoice: ") + (error.message || __("Unknown error")),
@@ -1367,7 +1366,8 @@ export default {
 							// Fix payment amounts for return invoice
 							vm.invoice_doc.payments.forEach((payment) => {
 								if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
-								if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
+								if (payment.base_amount > 0)
+									payment.base_amount = -Math.abs(payment.base_amount);
 							});
 
 							// Retry submission
@@ -1375,7 +1375,6 @@ export default {
 							setTimeout(() => {
 								vm.submit_invoice(print);
 							}, 500);
-
 						} else {
 							vm.eventBus.emit("show_message", {
 								title: __("Error submitting invoice: ") + errorMsg,
@@ -2130,4 +2129,3 @@ export default {
 	transition: box-shadow 0.3s ease-in-out;
 }
 </style>
-
