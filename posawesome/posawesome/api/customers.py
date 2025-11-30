@@ -85,6 +85,7 @@ def get_customer_names(pos_profile, limit=None, offset=None, start_after=None, m
                 "tax_id",
                 "customer_name",
                 "primary_address",
+                "customer_group"
             ],
             order_by="name",
             limit_start=None if start_after else offset,

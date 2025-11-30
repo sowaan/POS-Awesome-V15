@@ -539,50 +539,32 @@ def get_items_details(pos_profile, items_data, price_list=None, customer=None):
             "customer": customer or "",
         }
         query = """
-			SELECT
-				item_code,
-				price_list_rate,
-				currency,
-				uom,
-				customer
-			FROM (
-				SELECT
-					item_code,
-					price_list_rate,
-					currency,
-					uom,
-					customer,
-					valid_from,
-					valid_upto
-				FROM `tabItem Price`
-				WHERE
-					price_list = %(price_list)s
-					AND item_code IN %(item_codes)s
-					AND currency = %(currency)s
-					AND selling = 1
-					AND valid_from <= %(today)s
-					AND IFNULL(customer, '') IN ('', %(customer)s)
-					AND valid_upto >= %(today)s
-				UNION ALL
-				SELECT
-					item_code,
-					price_list_rate,
-					currency,
-					uom,
-					customer,
-					valid_from,
-					valid_upto
-				FROM `tabItem Price`
-				WHERE
-					price_list = %(price_list)s
-					AND item_code IN %(item_codes)s
-					AND currency = %(currency)s
-					AND selling = 1
-					AND valid_from <= %(today)s
-					AND IFNULL(customer, '') IN ('', %(customer)s)
-					AND (valid_upto IS NULL OR valid_upto = '')
-			) ip
-			ORDER BY IFNULL(customer, '') ASC, valid_from ASC, valid_upto DESC
+			        SELECT
+            item_code,
+            price_list_rate,
+            currency,
+            uom,
+            customer
+        FROM (
+            SELECT
+                item_code,
+                price_list_rate,
+                currency,
+                uom,
+                customer,
+                valid_from,
+                valid_upto
+            FROM `tabItem Price`
+            WHERE
+                price_list = %(price_list)s
+                AND item_code IN %(item_codes)s
+                AND currency = %(currency)s
+                AND selling = 1
+                AND (valid_from IS NULL OR valid_from <= %(today)s)
+                AND IFNULL(customer, '') IN ('', %(customer)s)
+                AND (valid_upto IS NULL OR valid_upto = '' OR valid_upto >= %(today)s)
+        ) ip
+        ORDER BY IFNULL(customer, '') ASC, valid_from ASC, valid_upto DESC
 		"""
         return frappe.db.sql(query, params, as_dict=True)
 
