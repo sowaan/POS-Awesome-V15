@@ -727,6 +727,7 @@ import {
 import renderOfflineInvoiceHTML from "../../../offline_print_template";
 import { silentPrint } from "../../plugins/print.js";
 
+
 export default {
 	// Using format mixin for shared formatting methods
 	mixins: [format],
@@ -1265,25 +1266,34 @@ export default {
 			this.submit_invoice(print);
 		},
 		// Submit invoice to backend after all validations
-		submit_invoice(print) {
+		async submit_invoice(print = false) {
+			const vm = this;
+
 			// For return invoices, ensure payments are negative one last time
 			if (this.invoice_doc.is_return) {
 				this.ensureReturnPaymentsAreNegative();
 			}
+
+			// Calculate total paid amount
 			let totalPayedAmount = 0;
 			this.invoice_doc.payments.forEach((payment) => {
 				payment.amount = this.flt(payment.amount);
 				totalPayedAmount += payment.amount;
 			});
+
 			if (this.invoice_doc.is_return && totalPayedAmount === 0) {
 				this.invoice_doc.is_pos = 0;
 			}
+
+			// Normalize customer credit values
 			if (this.customer_credit_dict.length) {
 				this.customer_credit_dict.forEach((row) => {
 					row.credit_to_redeem = this.flt(row.credit_to_redeem);
 				});
 			}
-			let data = {
+
+			// Build data payload
+			const data = {
 				total_change: !this.invoice_doc.is_return ? -this.diff_payment : 0,
 				paid_change: !this.invoice_doc.is_return ? this.paid_change : 0,
 				credit_change: -this.credit_change,
@@ -1291,25 +1301,35 @@ export default {
 				customer_credit_dict: this.customer_credit_dict,
 				is_cashback: this.is_cashback,
 			};
-			const vm = this;
 
+			// ------------------- OFFLINE SUBMISSION -------------------
 			if (isOffline()) {
 				try {
-					saveOfflineInvoice({ data: data, invoice: this.invoice_doc });
-					this.eventBus.emit("pending_invoices_changed", getPendingOfflineInvoiceCount());
+					// Save offline invoice first
+					await saveOfflineInvoice({ data, invoice: this.invoice_doc }, print);
+
+					vm.eventBus.emit("pending_invoices_changed", getPendingOfflineInvoiceCount());
+
 					vm.eventBus.emit("show_message", {
 						title: __("Invoice saved offline"),
 						color: "warning",
 					});
+
+					// Only launch print asynchronously without blocking the flow
 					if (print) {
-						this.print_offline_invoice(this.invoice_doc);
+						this.print_offline_invoice(this.invoice_doc)
+							.catch(err => console.error("Print failed:", err));
 					}
+
+					// Clear invoice and reset UI
 					vm.eventBus.emit("clear_invoice");
 					vm.eventBus.emit("focus_item_search");
 					vm.eventBus.emit("reset_posting_date");
 					vm.back_to_invoice();
 					vm.loading = false;
+
 					return;
+
 				} catch (error) {
 					vm.eventBus.emit("show_message", {
 						title: __("Cannot Save Offline Invoice: ") + (error.message || __("Unknown error")),
@@ -1319,6 +1339,8 @@ export default {
 					return;
 				}
 			}
+
+			// ------------------- ONLINE SUBMISSION -------------------
 			frappe.call({
 				method:
 					this.invoiceType === "Order" && this.pos_profile.posa_create_only_sales_order
@@ -1331,39 +1353,40 @@ export default {
 					invoice: this.invoice_doc,
 					order: this.invoice_doc,
 				},
-				callback: function (r) {
+				callback: async function (r) {
 					if (r.exc) {
 						console.error("Error submitting invoice:", r.exc);
-						// Show detailed error message to help debugging
 						let errorMsg = r.exc.toString();
+
 						if (errorMsg.includes("Amount must be negative")) {
 							vm.eventBus.emit("show_message", {
 								title: __("Fixing payment amounts for return invoice..."),
 								color: "warning",
 							});
-							// Force fix the amounts
+
+							// Fix payment amounts for return invoice
 							vm.invoice_doc.payments.forEach((payment) => {
-								if (payment.amount > 0) {
-									payment.amount = -Math.abs(payment.amount);
-								}
-								if (payment.base_amount > 0) {
-									payment.base_amount = -Math.abs(payment.base_amount);
-								}
+								if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
+								if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
 							});
-							// Retry submission once
+
+							// Retry submission
 							console.log("Retrying submission with fixed payment amounts");
 							setTimeout(() => {
 								vm.submit_invoice(print);
 							}, 500);
+
 						} else {
 							vm.eventBus.emit("show_message", {
 								title: __("Error submitting invoice: ") + errorMsg,
 								color: "error",
 							});
 						}
+
 						vm.loading = false;
 						return;
 					}
+
 					if (!r.message) {
 						vm.eventBus.emit("show_message", {
 							title: __("Error submitting invoice: No response from server"),
@@ -1372,14 +1395,19 @@ export default {
 						vm.loading = false;
 						return;
 					}
+
+					// Print only if print flag is true
 					if (print) {
 						vm.load_print_page();
 					}
+
+					// Reset invoice-related states
 					vm.customer_credit_dict = [];
 					vm.redeem_customer_credit = false;
 					vm.is_cashback = true;
 					vm.is_credit_return = false;
 					vm.sales_person = "";
+
 					vm.eventBus.emit("set_last_invoice", vm.invoice_doc.name);
 					vm.eventBus.emit("show_message", {
 						title:
@@ -1390,11 +1418,14 @@ export default {
 									: __("Invoice {0} is Submitted", [r.message.name]),
 						color: "success",
 					});
+
 					frappe.utils.play_sound("submit");
-					// Update local stock quantities immediately after successful
-					// invoice submission so item availability reflects changes
+
+					// Update stock locally
 					updateLocalStock(vm.invoice_doc.items || []);
 					vm.addresses = [];
+
+					// Clear and reset UI
 					vm.eventBus.emit("clear_invoice");
 					vm.eventBus.emit("focus_item_search");
 					vm.eventBus.emit("reset_posting_date");
@@ -1403,6 +1434,7 @@ export default {
 				},
 			});
 		},
+
 		// Set full amount for a payment method (or negative for returns)
 		set_full_amount(idx) {
 			const isReturn = this.invoice_doc.is_return || this.invoiceType === "Return";

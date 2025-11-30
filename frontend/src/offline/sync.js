@@ -2,76 +2,213 @@
 import { memory, resetOfflineState, setLastSyncTotals, MAX_QUEUE_ITEMS, reduceCacheUsage } from "./cache.js";
 import { persist } from "./core.js";
 import { updateLocalStock } from "./stock.js";
+import renderOfflineInvoiceHTML from "../offline_print_template.js";
 
+// Add this helper function at the top of your file (or before saveOfflineInvoice)
+function deepCloneSerializable(obj) {
+    if (obj === null || typeof obj !== 'object') {
+        return obj; // Return primitives as-is
+    }
+    if (Array.isArray(obj)) {
+        return obj.map(deepCloneSerializable); // Recurse for arrays
+    }
+    const cloned = {};
+    for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            const value = obj[key];
+            // Skip functions, undefined, and other non-serializable types
+            if (typeof value !== 'function' && value !== undefined) {
+                cloned[key] = deepCloneSerializable(value);
+            }
+        }
+    }
+    return cloned;
+}
 // Flag to avoid concurrent invoice syncs which can cause duplicate submissions
 let invoiceSyncInProgress = false;
+// Paste printOfflineInvoice here
+async function printOfflineInvoice(invoice, fiscalPayload) {
+    const html = await renderOfflineInvoiceHTML(invoice);
+    const w = window.open();
+    if (!w) {
+        console.error("Failed to open print window (popup blocker?)");
+        return;
+    }
+    w.document.write(html);
+    w.document.close();
 
-export async function saveOfflineInvoice(entry) {
-	console.log("Attempting to save offline invoice", entry);
+    // Wait for document + images with better handling
+    await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            console.warn("Print timeout reached, forcing print.");
+            w.print();
+            setTimeout(() => w.close(), 1000); // Close after a delay
+            resolve();
+        }, 5000); // 5-second timeout as fallback
 
-	// Validate items
-	if (!entry.invoice || !Array.isArray(entry.invoice.items) || !entry.invoice.items.length) {
-		throw new Error("Cart is empty. Add items before saving.");
-	}
+        w.onload = () => {
+            clearTimeout(timeout); // Cancel timeout if load succeeds
+            const imgs = w.document.images;
+            let pending = 0;
 
-	const key = "offline_invoices";
-	const entries = memory.offline_invoices;
+            // Count only unloaded images
+            [...imgs].forEach(img => {
+                if (!img.complete) {
+                    pending++;
+                    img.onload = img.onerror = () => {
+                        if (--pending === 0) {
+                            w.print();
+                            setTimeout(() => w.close(), 1000); // Close after print
+                            resolve();
+                        }
+                    };
+                }
+            });
 
-	let cleanEntry;
-	try {
-		cleanEntry = JSON.parse(JSON.stringify(entry));
-	} catch (e) {
-		console.error("Failed to serialize offline invoice", e);
-		throw e;
-	}
+            // If no pending images (all already loaded), print immediately
+            if (pending === 0) {
+                w.print();
+                setTimeout(() => w.close(), 1000);
+                resolve();
+            }
+        };
 
-	console.log("Saving offline invoice", cleanEntry);
-	console.log("Invoice doc:", cleanEntry.invoice);
+        // Handle window close (optional, in case user closes early)
+        w.onbeforeunload = () => {
+            clearTimeout(timeout);
+            resolve(); // Allow the function to proceed
+        };
+    });
+}
 
-	//  CHECK IF FBR APP IS INSTALLED VIA SERVER FUNCTION
-	let fbr_installed = false;
-	try {
-		const r = await frappe.call({
-			method: "posawesome.posawesome.api.fbr_helpers.is_fbr_installed",
-		});
-		fbr_installed = r.message;
-	} catch (e) {
-		console.warn("Could not check FBR installation, skipping FBR call", e);
-	}
 
-	if (fbr_installed) {
-		console.log("FBR app detected → sending invoice to FBR");
 
-		frappe.call({
-			method: "fbr_fiscal_bridge.fbr_fiscal_bridge.api.fbr_fiscal_component.send_offline_invoice",
-			args: { invoice: JSON.stringify(cleanEntry.invoice) },
-			callback(r) {
-				if (r.message?.InvoiceNumber) {
-					cleanEntry.invoice.custom_fbr_fiscal_invoice_number = r.message.InvoiceNumber;
-					console.log("FBR Invoice Number:", r.message.InvoiceNumber);
-				}
-			},
-			error(err) {
-				console.error("Failed to send invoice to FBR", err);
-			},
-		});
-	} else {
-		console.log("FBR Fiscal Bridge NOT installed → Skipping FBR Call (Normal Offline Behavior)");
-	}
+export async function saveOfflineInvoice(entry, print = false) {
+    console.log("Attempting to save offline invoice", entry);
 
-	//  NORMAL OFFLINE SAVE
-	entries.push(cleanEntry);
+    // Validate invoice items
+    if (!entry.invoice || !Array.isArray(entry.invoice.items) || !entry.invoice.items.length) {
+        throw new Error("Cart is empty. Add items before saving.");
+    }
 
-	if (entries.length > MAX_QUEUE_ITEMS) {
-		entries.splice(0, entries.length - MAX_QUEUE_ITEMS);
-	}
+    const key = "offline_invoices";
+    const entries = memory.offline_invoices || [];
 
-	memory.offline_invoices = entries;
-	persist(key, memory.offline_invoices);
+    let cleanEntry;
+    try {
+		cleanEntry = deepCloneSerializable(entry);
+    } catch (e) {
+        console.error("Failed to serialize offline invoice", e);
+        throw e;
+    }
 
-	if (entry.invoice?.items) {
-		updateLocalStock(entry.invoice.items);
-	}
+    console.log("Saving offline invoice", cleanEntry);
+
+    // Build fiscal payload
+    let fiscalPayload = {};
+    try {
+        const invoice = cleanEntry.invoice;
+        const posID = invoice.pos_profile?.custom_pos_id || "110014";
+        const totalTaxes = parseFloat(invoice.total_taxes_and_charges || 0);
+        const netTotal = parseFloat(invoice.net_total || invoice.grand_total || 0);
+        const taxRate = netTotal ? Math.round((totalTaxes / netTotal) * 100) : 0;
+
+        let totalQuantity = 0;
+        const items = invoice.items.map(item => {
+            const rateAfterDiscount = parseFloat(item.rate || 0) * (1 - ((parseFloat(invoice.additional_discount_percentage) || 0) / 100));
+            const amountAfterDiscount = parseFloat(item.qty || 0) * rateAfterDiscount;
+            const taxCharged = amountAfterDiscount * taxRate / 100;
+
+            totalQuantity += parseFloat(item.qty || 0);
+            const pctCode = item.custom_pct_code || "11001010";
+
+            return {
+                ItemCode: item.item_code,
+                ItemName: item.item_name,
+                Quantity: parseFloat(item.qty || 0),
+                PCTCode: pctCode,
+                TaxRate: taxRate,
+                SaleValue: rateAfterDiscount,
+                TotalAmount: amountAfterDiscount,
+                TaxCharged: taxCharged,
+                Discount: 0.0,
+                FurtherTax: 0.0,
+                InvoiceType: 2,
+                RefUSIN: null
+            };
+        });
+
+        fiscalPayload = {
+            InvoiceNumber: "",
+            POSID: posID,
+            USIN: "SI-TEST-001",
+            DateTime: `${invoice.posting_date || new Date().toISOString().split("T")[0]} ${invoice.posting_time || "00:00:00"}`,
+            BuyerName: invoice.customer || "Walkin",
+            BuyerNTN: invoice.customer_ntn || "",
+            TotalBillAmount: parseFloat(invoice.grand_total || 0),
+            TotalQuantity: totalQuantity,
+            TotalSaleValue: parseFloat(invoice.net_total || 0),
+            TotalTaxCharged: totalTaxes,
+            Discount: 0.0,
+            FurtherTax: 0.0,
+            PaymentMode: 1,
+            RefUSIN: null,
+            InvoiceType: 1,
+            Items: items
+        };
+
+        console.log("Fiscal payload ready:", fiscalPayload);
+
+        // Call Local Fiscal Proxy
+        try {
+            const res = await fetch("http://localhost:8525/api/get_fiscal_invoice", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(fiscalPayload)
+            });
+
+            let data;
+            try {
+                data = await res.json();
+            } catch (e) {
+                console.error("Fiscal proxy returned invalid JSON:", await res.text());
+                data = { status: "error", message: "Invalid JSON from fiscal proxy" };
+            }
+
+            if (data.status === "success" && data.fiscal?.InvoiceNumber) {
+                // Update invoice with fiscal number
+                cleanEntry.invoice.custom_fbr_fiscal_invoice_number = data.fiscal.InvoiceNumber;
+                console.log("Fiscal Invoice Number:", data.fiscal.InvoiceNumber);
+
+                // Only print if print flag is true
+                if (print) {
+                    await printOfflineInvoice(cleanEntry.invoice, data.fiscal);
+                }
+            } else {
+                console.error("Fiscal Error:", data.message || data);
+            }
+
+        } catch (err) {
+            console.error("Cannot reach Local Fiscal Proxy (is proxy.py running?)", err);
+        }
+
+    } catch (err) {
+        console.error("Error building fiscal payload:", err);
+    }
+
+    // Normal offline save
+    entries.push(cleanEntry);
+    if (entries.length > MAX_QUEUE_ITEMS) {
+        entries.splice(0, entries.length - MAX_QUEUE_ITEMS);
+    }
+    memory.offline_invoices = entries;
+    persist(key, memory.offline_invoices);
+
+    if (entry.invoice?.items) {
+        updateLocalStock(entry.invoice.items);
+    }
+
+    console.log("Offline invoice saved successfully.");
 }
 
 export function isOffline() {
