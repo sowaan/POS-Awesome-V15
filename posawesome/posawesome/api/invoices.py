@@ -41,7 +41,7 @@ def _sanitize_item_name(name: str) -> str:
     cleaned = strip_html_tags(name)
     return cleaned.strip()[:140]
 
-
+@frappe.whitelist()
 def _apply_item_name_overrides(invoice_doc, overrides=None):
     """Apply custom item names to invoice items."""
     overrides = overrides or {}
@@ -115,7 +115,7 @@ def _should_block(pos_profile):
     allow_negative = cint(frappe.get_value("Stock Settings", None, "allow_negative_stock"))
     return block_sale and not allow_negative
 
-
+frappe.whitelist()
 def _validate_stock_on_invoice(invoice_doc):
     if invoice_doc.doctype == "Sales Invoice" and not cint(getattr(invoice_doc, "update_stock", 0)):
         frappe.logger().debug("Skipping stock validation for Sales Invoice without stock update")
@@ -127,7 +127,7 @@ def _validate_stock_on_invoice(invoice_doc):
     if errors and _should_block(invoice_doc.pos_profile):
         frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
-
+frappe.whitelist()
 def _auto_set_return_batches(invoice_doc):
     """Assign batch numbers for return invoices without a source invoice.
 
