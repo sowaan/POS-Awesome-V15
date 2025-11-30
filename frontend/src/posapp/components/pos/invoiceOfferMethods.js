@@ -183,7 +183,7 @@ export default {
 			if (this.checkOfferCoupon(offer)) {
 				const combined = [...this.items, ...this.packed_items];
 				combined.forEach((item) => {
-					if (!item.posa_is_offer && item.item_code === offer.item && this.checkCustomerGroupCondition(offer) {
+					if (!item.posa_is_offer && item.item_code === offer.item && this.checkCustomerGroupCondition(offer)) {
 						if (
 							offer.offer === "Item Price" &&
 							item.posa_offer_applied &&
@@ -215,7 +215,7 @@ export default {
 				let total_amount = 0;
 				const combined = [...this.items, ...this.packed_items];
 				combined.forEach((item) => {
-					if (!item.posa_is_offer && item.item_group === offer.item_group && this.checkCustomerGroupCondition(offer) {
+					if (!item.posa_is_offer && item.item_group === offer.item_group && this.checkCustomerGroupCondition(offer)) {
 						if (
 							offer.offer === "Item Price" &&
 							item.posa_offer_applied &&
