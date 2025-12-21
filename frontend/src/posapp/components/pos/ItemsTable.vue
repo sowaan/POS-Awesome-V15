@@ -315,8 +315,8 @@
 											]"
 											:disabled="
 												!pos_profile.posa_allow_user_to_edit_item_discount ||
-												!!item.posa_is_replace ||
-												!!item.posa_offer_applied
+												!!item.posa_is_replace 
+												// || !!item.posa_offer_applied
 											"
 											prepend-inner-icon="mdi-percent"
 										></v-text-field>

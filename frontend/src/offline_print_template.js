@@ -109,171 +109,172 @@ export function defaultOfflineHTML(invoice, terms = "") {
 	const taxRate = invoice.taxes?.length ? invoice.taxes[0].rate : 0;
 	const totalQty = invoice.items?.reduce((sum, item) => sum + (item.qty || 0), 0);
 
-    return`
-	<!DOCTYPE html>
-	<html>
-	<head>
-	<meta charset="UTF-8">
-	<title>Receipt</title>
-	
-	<style>
-	
-	.print-format {
-		width: 58mm;             
-		margin: 0;
-		padding: 0 3px;
-		font-family: Monospace !important;
-		font-size: 9px;
-	}
-	
-	table {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	
-	.no-border,
-	.no-border td,
-	.no-border th {
-		border: none !important;
-	}
-	
-	td, th {
-		padding: 0 !important;
-		margin: 0 !important;
-		line-height: 1.1;
-	}
-	
-	.text-right { text-align: right; }
-	.text-left  { text-align: left; }
-	.text-center { text-align: center; }
-	
-	hr {
-		border-top: 1px dashed black;
-		margin: 2px 0;
-	}
-	
-	.logo {
-		width: 90px;
-	}
-	
-	.qr-img {
-		width: 70px;
-	}
-	
-	</style>
-	</head>
-	
-	<body>
-	<div class="print-format">
-	
-		<!-- LOGO -->
-		<div style="text-align: left;">
-			<img src="/assets/posawesome/images/comp.jpg" width="80">
-		</div>
-	
-		<hr>
-	
-		<!-- HEADER INFO -->
-		<p>
-			FBR Number: ${fbrNumber}<br>
-			Customer: ${invoice.customer || "Walk-in"}<br>
-			Date: ${invoice.posting_date}
-		</p>
-	
-		<hr>
-	
-		<!-- ITEM TABLE -->
-		<table>
-			<thead>
-				<tr>
-					<th width="38%">Item</th>
-					<th width="12%">Price</th>
-					<th width="10%">Dis</th>
-					<th width="10%" class="text-right">Qty</th>
-					<th width="10%" class="text-right">Rate</th>
-					<th width="20%" class="text-right">Amount</th>
-				</tr>
-			</thead>
-	
-			<tbody>
-				${invoice.items
-					.map(item => `
-					<tr>
-						<td colspan="6"><b>${item.item_name}</b></td>
-					</tr>
-	
-					<tr>
-						<td></td>
-						<td>${item.price_list_rate}</td>
-						<td>${item.discount_amount || 0}</td>
-						<td class="text-right">${item.qty}</td>
-						<td class="text-right">${item.rate}</td>
-						<td class="text-right">${item.amount}</td>
-					</tr>
-				`).join('')}
-			</tbody>
-		</table>
-	
-		<hr>
-	
-		<!-- TOTALS SECTION -->
-		<table class="no-border">
-	
-			<tr>
-				<td>Net Total</td>
-				<td class="text-right">${invoice.total}</td>
-			</tr>
-	
-			<tr>
-				<td>GST @${invoice.taxes?.[0]?.rate || 0}%</td>
-				<td class="text-right">${invoice.total_taxes_and_charges}</td>
-			</tr>
-	
-			${invoice.discount_amount ? `
-			<tr>
-				<td>Discount</td>
-				<td class="text-right">-${invoice.discount_amount}</td>
-			</tr>` : ''}
-	
-			<tr>
-				<td><b>Grand Total</b></td>
-				<td class="text-right"><b>${invoice.grand_total}</b></td>
-			</tr>
-	
-			<tr>
-				<td>Paid Amount</td>
-				<td class="text-right">${invoice.paid_amount}</td>
-			</tr>
-	
-			<tr>
-				<td>Total Qty</td>
-				<td class="text-right">${totalQty}</td>
-			</tr>
-	
-		</table>
-	
-		<hr>
-	
-		<p class="text-center">Thank you, please visit again.</p>
-	
-		<!-- FBR Logo -->
-		<div style="text-align:center; margin-top:5px;">
-			<img src="/assets/posawesome/images/fbr_loog.png" width="80">
-		</div>
+return `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Receipt</title>
 
-		<!-- QR CODE -->
-		${qrSVG ? `
-		<div style="text-align:center; margin-top:5px;">
-			${qrSVG.replace('<svg', '<svg width="70" height="70"')}
-		</div>` : ""}
+<style>
 
-	
-		${fbrNumber ? `<p class="text-center"><b>${fbrNumber}</b></p>` : ""}
-	
-		<p style="text-align:center; margin-top:10px;">Powered by Sowaan ERP</p>	
-	</div>
-	</body>
-	</html>`;
+.print-format {
+    width: 58mm;             
+    margin: 0;
+    padding: 0 3px;
+    font-family: Monospace !important;
+    font-size: 7px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.no-border,
+.no-border td,
+.no-border th {
+    border: none !important;
+}
+
+td, th {
+    padding: 0 !important;
+    margin: 0 !important;
+    line-height: 1.1;
+}
+
+.text-right { text-align: right; }
+.text-left  { text-align: left; }
+.text-center { text-align: center; }
+
+hr {
+    border-top: 1px dashed black;
+    margin: 2px 0;
+}
+
+.logo {
+    width: 90px;
+}
+
+.qr-img {
+    width: 90px;
+}
+
+</style>
+</head>
+
+<body>
+<div class="print-format">
+
+    <!-- LOGO -->
+    <div style="text-align: left;">
+        <img src="/files/aaaaaaaaaa5fe70e.jpg" class="logo">
+    </div>
+
+    <hr>
+
+    <!-- HEADER INFO -->
+    <p>
+        POS No: ${invoice.name}<br>
+        Cashier: ${invoice.owner}<br>
+        Customer: ${invoice.customer || "Walk-in"}<br>
+        Date: ${invoice.posting_date}
+    </p>
+
+    <hr>
+
+    <!-- ITEM TABLE -->
+    <table>
+        <thead>
+            <tr>
+                <th width="38%">Item</th>
+                <th width="12%">Price</th>
+                <th width="10%">Dis</th>
+                <th width="10%" class="text-right">Qty</th>
+                <th width="10%" class="text-right">Rate</th>
+                <th width="20%" class="text-right">Amount</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            ${invoice.items.map(item => `
+            <tr>
+                <td colspan="6"><b>${item.item_name}</b></td>
+            </tr>
+
+            <tr>
+                <td></td>
+                <td>${item.price_list_rate}</td>
+                <td>${item.discount_amount || 0}</td>
+                <td class="text-right">${item.qty}</td>
+                <td class="text-right">${item.rate}</td>
+                <td class="text-right">${item.amount}</td>
+            </tr>
+            `).join('')}
+        </tbody>
+    </table>
+
+    <hr>
+
+    <!-- TOTALS SECTION -->
+    <table class="no-border">
+        <tr>
+            <td>Net Total</td>
+            <td class="text-right">${invoice.total}</td>
+        </tr>
+
+        ${invoice.taxes?.map(tax => `
+            ${!tax.included_in_print_rate ? `
+            <tr>
+                <td>GST @${tax.rate}%</td>
+                <td class="text-right">${tax.tax_amount}</td>
+            </tr>` : ''}
+        `).join('')}
+
+        ${invoice.discount_amount ? `
+        <tr>
+            <td>Discount</td>
+            <td class="text-right">-${invoice.discount_amount}</td>
+        </tr>` : ''}
+
+        <tr>
+            <td><b>Grand Total</b></td>
+            <td class="text-right"><b>${invoice.grand_total}</b></td>
+        </tr>
+
+        <tr>
+            <td>Paid Amount</td>
+            <td class="text-right">${invoice.paid_amount}</td>
+        </tr>
+
+        <tr>
+            <td>Total Qty</td>
+            <td class="text-right">${totalQty}</td>
+        </tr>
+    </table>
+
+    <hr>
+
+    <p class="text-center">Thank you, please visit again.</p>
+
+    <!-- FBR Logo -->
+    <div style="text-align:center; margin-top:5px;">
+        <img src="/files/fbr_loog.png" width="80">
+    </div>
+
+    <!-- QR CODE -->
+    ${qrSVG ? `
+    <div style="text-align:center; margin-top:5px;">
+        ${qrSVG.replace('<svg', '<svg class="qr-img"')}
+    </div>` : ""}
+
+    ${fbrNumber ? `<p class="text-center"><b>${fbrNumber}</b></p>` : ""}
+
+    <p style="text-align:center; margin-top:10px;">Powered by Sowaan ERP</p>
+</div>
+</body>
+</html>`;
+
 	
 }
 
