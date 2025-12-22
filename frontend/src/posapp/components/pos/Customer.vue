@@ -67,9 +67,9 @@
 					<v-list-item-subtitle v-if="item.raw.customer_name !== item.raw.name">
 						<div v-html="`ID: ${item.raw.name}`"></div>
 					</v-list-item-subtitle>
-					
-						<div v-text="`Customer Group: ${item.raw.customer_group || '-'}`"></div>
-
+					<v-list-item-subtitle >
+						<div v-html="`Customer Group: ${item.raw.customer_group  || '-' }`"></div>
+					</v-list-item-subtitle>						
 					<v-list-item-subtitle v-if="item.raw.tax_id">
 						<div v-html="`TAX ID: ${item.raw.tax_id}`"></div>
 					</v-list-item-subtitle>
