@@ -60,7 +60,6 @@
 					</template>
 				</v-tooltip>
 			</template>
-
 			<!-- Dropdown display -->
 			<template #item="{ props, item }">
 				<v-list-item v-bind="props">
@@ -332,6 +331,7 @@ export default {
 				await checkDbHealth();
 				if (!db.isOpen()) await db.open();
 				let collection = db.table("customers");
+
 				const normalizedTerm = typeof term === "string" ? term.trim().toLowerCase() : "";
 				if (normalizedTerm) {
 					const searchParts = normalizedTerm.split(/\s+/).filter(Boolean);
@@ -346,6 +346,7 @@ export default {
 							customer.mobile_no,
 							customer.email_id,
 							customer.tax_id,
+							customer.customer_group,
 						]
 							.filter((value) => value !== null && value !== undefined)
 							.map((value) => String(value).toLowerCase());
