@@ -68,7 +68,7 @@
 								ref="debounce_search"
 							>
 								<!-- Add camera scan button if enabled -->
-								<template v-slot:append-inner v-if="pos_profile.posa_enable_camera_scanning">
+								<template v-slot:append-inner v-if="pos_profile && pos_profile.posa_enable_camera_scanning">
 									<v-btn
 										icon="mdi-camera"
 										size="small"
@@ -86,7 +86,7 @@
 								</template>
 							</v-text-field>
 						</v-col>
-						<v-col cols="3" class="pb-0" v-if="pos_profile.posa_input_qty">
+						<v-col cols="3" class="pb-0" v-if="pos_profile && pos_profile.posa_input_qty">
 							<v-text-field
 								density="compact"
 								variant="solo"
@@ -100,7 +100,7 @@
 								@focus="clearQty"
 							></v-text-field>
 						</v-col>
-						<v-col cols="2" class="pb-0" v-if="pos_profile.posa_new_line">
+						<v-col cols="2" class="pb-0" v-if="pos_profile && pos_profile.posa_new_line">
 							<v-checkbox
 								v-model="new_line"
 								color="accent"
@@ -398,7 +398,7 @@
 						v-model="item_group"
 					></v-select>
 				</v-col>
-				<v-col cols="12" class="mb-2" v-if="pos_profile.posa_enable_price_list_dropdown !== false">
+				<v-col cols="12" class="mb-2" v-if="!pos_profile || pos_profile.posa_enable_price_list_dropdown !== false">
 					<v-text-field
 						density="compact"
 						variant="solo"
@@ -443,9 +443,9 @@
 
 		<!-- Camera Scanner Component -->
 		<CameraScanner
-			v-if="pos_profile.posa_enable_camera_scanning"
+			v-if="pos_profile && pos_profile.posa_enable_camera_scanning"
 			ref="cameraScanner"
-			:scan-type="pos_profile.posa_camera_scan_type || 'Both'"
+			:scan-type="(pos_profile && pos_profile.posa_camera_scan_type) || 'Both'"
 			@barcode-scanned="onBarcodeScanned"
 		/>
 	</div>

@@ -37,6 +37,11 @@ export default {
 		if (target && this.fetch_available_qty) {
 			this.fetch_available_qty(target);
 		}
+		// Sync item_tax_rate from backend so tax column shows immediately.
+		// Requires a customer because ERPNext's withholding tax validation throws without one.
+		if (this.customer && this.items.length) {
+			this.update_invoice(this.get_invoice_doc());
+		}
 		return res;
 	},
 
@@ -678,6 +683,8 @@ export default {
 				batch_no: item.batch_no,
 				posa_notes: item.posa_notes,
 				posa_delivery_date: this.formatDateForBackend(item.posa_delivery_date),
+				item_tax_template: item.item_tax_template || "",
+				item_tax_rate: item.item_tax_rate || "{}",
 			};
 			if (isReturn) {
 				const refField = usesPosInvoice ? "pos_invoice_item" : "sales_invoice_item";
@@ -832,6 +839,50 @@ export default {
 		return this.flt(amount * this.exchange_rate, this.currency_precision);
 	},
 
+	// Sync item_tax_rate and item_tax_template from the backend invoice_doc.items
+	// onto this.items (matched by posa_row_id), so computeItemTaxAmount can
+	// calculate the correct per-row tax amount from the server-resolved rates.
+	_syncItemTaxAmounts(doc) {
+		if (!doc || !doc.items) return;
+
+		// DEBUG — remove after confirming
+		console.log("[TAX DEBUG] doc.items sample:", doc.items.slice(0, 3).map((i) => ({
+			item_code: i.item_code,
+			posa_row_id: i.posa_row_id,
+			item_tax_template: i.item_tax_template,
+			item_tax_rate: i.item_tax_rate,
+		})));
+		console.log("[TAX DEBUG] this.items sample:", this.items.slice(0, 3).map((i) => ({
+			item_code: i.item_code,
+			posa_row_id: i.posa_row_id,
+		})));
+
+		// Build: posa_row_id → {item_tax_rate, item_tax_template} from backend items
+		const rateByRowId = {};
+		for (const invItem of doc.items) {
+			if (invItem.posa_row_id != null) {
+				rateByRowId[invItem.posa_row_id] = {
+					item_tax_rate: invItem.item_tax_rate || "{}",
+					item_tax_template: invItem.item_tax_template || "",
+				};
+			}
+		}
+
+		console.log("[TAX DEBUG] rateByRowId:", rateByRowId);
+
+		// Write back onto this.items (Vue 3 Proxy tracks new properties)
+		for (const item of this.items) {
+			const synced = rateByRowId[item.posa_row_id];
+			if (synced) {
+				item.item_tax_rate = synced.item_tax_rate;
+				item.item_tax_template = synced.item_tax_template;
+				console.log("[TAX DEBUG] synced item:", item.item_code, "→ rate:", item.item_tax_rate, "template:", item.item_tax_template);
+			} else {
+				console.warn("[TAX DEBUG] no match for posa_row_id:", item.posa_row_id, "item:", item.item_code);
+			}
+		}
+	},
+
 	// Update invoice in backend
 	update_invoice(doc) {
 		var vm = this;
@@ -855,6 +906,7 @@ export default {
 			callback: function (r) {
 				if (r.message) {
 					vm.invoice_doc = r.message;
+					vm._syncItemTaxAmounts(r.message);
 					if (r.message.exchange_rate_date) {
 						vm.exchange_rate_date = r.message.exchange_rate_date;
 						const posting_backend = vm.formatDateForBackend(vm.posting_date_display);
@@ -1550,6 +1602,8 @@ export default {
 					item.stock_uom = data.stock_uom;
 					item.has_serial_no = data.has_serial_no;
 					item.has_batch_no = data.has_batch_no;
+					item.item_tax_template = data.item_tax_template || "";
+					item.item_tax_rate = data.item_tax_rate || "{}";
 
 					// Calculate final amount
 					item.amount = vm.flt(item.qty * item.rate, vm.currency_precision);

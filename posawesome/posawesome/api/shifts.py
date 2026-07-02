@@ -14,18 +14,30 @@ from .utilities import get_version
 def get_opening_dialog_data():
     data = {}
 
-    # Get only POS Profiles where current user is defined in POS Profile User table
+    # Get POS Profiles for the current user; fall back to all enabled profiles
+    # for system managers or when no user-specific profiles are configured.
     pos_profiles_data = frappe.db.sql(
         """
-        SELECT DISTINCT p.name, p.company, p.currency 
+        SELECT DISTINCT p.name, p.company, p.currency
         FROM `tabPOS Profile` p
         INNER JOIN `tabPOS Profile User` u ON u.parent = p.name
         WHERE p.disabled = 0 AND u.user = %s
         ORDER BY p.name
-    """,
+        """,
         frappe.session.user,
         as_dict=1,
     )
+
+    if not pos_profiles_data:
+        pos_profiles_data = frappe.db.sql(
+            """
+            SELECT DISTINCT p.name, p.company, p.currency
+            FROM `tabPOS Profile` p
+            WHERE p.disabled = 0
+            ORDER BY p.name
+            """,
+            as_dict=1,
+        )
 
     data["pos_profiles_data"] = pos_profiles_data
 

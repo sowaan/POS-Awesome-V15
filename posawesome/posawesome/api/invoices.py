@@ -5,6 +5,7 @@ import json
 
 import frappe
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
+from erpnext.stock.get_item_details import get_item_tax_map, get_item_tax_template
 from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from erpnext.setup.utils import get_exchange_rate
 from erpnext.stock.doctype.batch.batch import (
@@ -88,6 +89,69 @@ def _collect_stock_errors(items):
                 }
             )
         return errors
+
+
+def _resolve_item_tax_templates(invoice_doc):
+    """Resolve item_tax_template from item/item group for each item, populate
+    item_tax_rate, and ensure the corresponding tax account rows exist in
+    invoice_doc.taxes so that calculate_taxes_and_totals() applies the correct rates."""
+    added_rows = False
+    args_base = frappe._dict(
+        {
+            "company": invoice_doc.company,
+            "posting_date": invoice_doc.posting_date,
+            "tax_category": invoice_doc.get("tax_category") or "",
+        }
+    )
+
+    for item in invoice_doc.items:
+        # If item_tax_template is missing, resolve it from the item / item group hierarchy
+        if not item.get("item_tax_template") and item.get("item_code"):
+            args = frappe._dict(
+                args_base,
+                item_code=item.item_code,
+                net_rate=flt(item.rate),
+            )
+            resolved = get_item_tax_template(args)
+            if resolved:
+                item.item_tax_template = resolved
+
+        # Parse item_tax_rate — treat "{}" or empty string as missing
+        item_tax_rate = item.get("item_tax_rate") or "{}"
+        if isinstance(item_tax_rate, str):
+            try:
+                item_tax_rate = json.loads(item_tax_rate)
+            except Exception:
+                item_tax_rate = {}
+
+        # If we have a template but the rate map is empty, build it now
+        if item.get("item_tax_template") and not item_tax_rate:
+            item.item_tax_rate = get_item_tax_map(
+                invoice_doc.company, item.item_tax_template, as_json=True
+            )
+            # Re-parse the freshly built map
+            try:
+                item_tax_rate = json.loads(item.item_tax_rate)
+            except Exception:
+                item_tax_rate = {}
+
+        for account_head in item_tax_rate:
+            if not invoice_doc.get_tax_row(account_head):
+                invoice_doc.append(
+                    "taxes",
+                    {
+                        "charge_type": "On Net Total",
+                        "account_head": account_head,
+                        "rate": 0,
+                        "description": account_head.split(" - ")[0],
+                        "category": "Total",
+                        "add_deduct_tax": "Add",
+                    },
+                )
+                added_rows = True
+
+    if added_rows:
+        invoice_doc.calculate_taxes_and_totals()
 
 
 def _merge_duplicate_taxes(invoice_doc):
@@ -311,6 +375,9 @@ def update_invoice(data):
 
     # Reapply any custom item names after defaults are set
     _apply_item_name_overrides(invoice_doc, overrides)
+
+    # Resolve item-group-level tax templates and ensure their tax rows exist
+    _resolve_item_tax_templates(invoice_doc)
 
     # Remove duplicate taxes from item and profile templates
     _merge_duplicate_taxes(invoice_doc)

@@ -119,6 +119,17 @@
 				</div>
 			</template>
 
+			<!-- Tax amount column -->
+			<template v-slot:item.item_tax_amount="{ item }">
+				<div class="currency-display right-aligned">
+					<template v-if="item.item_tax_template">
+						<span class="currency-symbol">{{ currencySymbol(displayCurrency) }}</span>
+						<span class="amount-value">{{ formatCurrency(computeItemTaxAmount(item)) }}</span>
+					</template>
+					<span v-else class="text-disabled">—</span>
+				</div>
+			</template>
+
 			<!-- Discount percentage column -->
 			<template v-slot:item.discount_value="{ item }">
 				<div class="currency-display right-aligned">
@@ -773,8 +784,10 @@ export default {
 						// Ultra-compact: only essential columns
 						return ["item_name", "qty", "amount", "actions"].includes(header.key);
 					} else if (this.containerWidth < 700) {
-						// Compact: essential + rate
-						return ["item_name", "qty", "rate", "amount", "actions"].includes(header.key);
+						// Compact: essential + rate + tax
+						return ["item_name", "qty", "rate", "amount", "item_tax_amount", "actions"].includes(
+							header.key,
+						);
 					} else if (this.containerWidth < 900) {
 						// Medium: hide advanced columns
 						return !["discount_value", "price_list_rate"].includes(header.key);
@@ -897,6 +910,23 @@ export default {
 		},
 	},
 	methods: {
+		computeItemTaxAmount(item) {
+			const raw = item.item_tax_rate;
+			if (!raw) return 0;
+			let rates;
+			try {
+				rates = typeof raw === "string" ? JSON.parse(raw) : raw;
+			} catch (e) {
+				return 0;
+			}
+			if (!rates || !Object.keys(rates).length) return 0;
+			const amount = parseFloat(item.qty || 0) * parseFloat(item.rate || 0);
+			return Object.values(rates).reduce(
+				(sum, rate) => sum + (amount * parseFloat(rate || 0)) / 100,
+				0,
+			);
+		},
+
 		customItemFilter(value, search, item) {
 			if (search == null) {
 				return true;

@@ -453,6 +453,7 @@ export default {
 				{ title: __("Discount Amount"), key: "discount_amount", align: "end", required: false },
 				{ title: __("Rate"), key: "rate", align: "center", required: true },
 				{ title: __("Amount"), key: "amount", align: "center", required: true },
+				{ title: __("Tax"), key: "item_tax_amount", align: "end", required: false },
 				{ title: __("Offer?"), key: "posa_is_offer", align: "center", required: false },
 				{ title: __("Actions"), key: "actions", align: "center", required: true, sortable: false },
 			];
@@ -464,6 +465,7 @@ export default {
 					.filter((col) => {
 						if (col.required) return true;
 						if (col.key === "price_list_rate") return true;
+						if (col.key === "item_tax_amount") return true;
 						if (col.key === "discount_value" && this.pos_profile.posa_display_discount_percentage)
 							return true;
 						if (col.key === "discount_amount" && this.pos_profile.posa_display_discount_amount)
