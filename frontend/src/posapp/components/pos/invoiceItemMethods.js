@@ -845,17 +845,17 @@ export default {
 	_syncItemTaxAmounts(doc) {
 		if (!doc || !doc.items) return;
 
-		// DEBUG — remove after confirming
-		console.log("[TAX DEBUG] doc.items sample:", doc.items.slice(0, 3).map((i) => ({
-			item_code: i.item_code,
-			posa_row_id: i.posa_row_id,
-			item_tax_template: i.item_tax_template,
-			item_tax_rate: i.item_tax_rate,
-		})));
-		console.log("[TAX DEBUG] this.items sample:", this.items.slice(0, 3).map((i) => ({
-			item_code: i.item_code,
-			posa_row_id: i.posa_row_id,
-		})));
+		// // [TAX DEBUG] — uncomment to debug tax sync
+		// console.log("[TAX DEBUG] doc.items sample:", doc.items.slice(0, 3).map((i) => ({
+		// 	item_code: i.item_code,
+		// 	posa_row_id: i.posa_row_id,
+		// 	item_tax_template: i.item_tax_template,
+		// 	item_tax_rate: i.item_tax_rate,
+		// })));
+		// console.log("[TAX DEBUG] this.items sample:", this.items.slice(0, 3).map((i) => ({
+		// 	item_code: i.item_code,
+		// 	posa_row_id: i.posa_row_id,
+		// })));
 
 		// Build: posa_row_id → {item_tax_rate, item_tax_template} from backend items
 		const rateByRowId = {};
@@ -868,7 +868,7 @@ export default {
 			}
 		}
 
-		console.log("[TAX DEBUG] rateByRowId:", rateByRowId);
+		// console.log("[TAX DEBUG] rateByRowId:", rateByRowId);
 
 		// Write back onto this.items (Vue 3 Proxy tracks new properties)
 		for (const item of this.items) {
@@ -876,9 +876,9 @@ export default {
 			if (synced) {
 				item.item_tax_rate = synced.item_tax_rate;
 				item.item_tax_template = synced.item_tax_template;
-				console.log("[TAX DEBUG] synced item:", item.item_code, "→ rate:", item.item_tax_rate, "template:", item.item_tax_template);
+				// console.log("[TAX DEBUG] synced item:", item.item_code, "→ rate:", item.item_tax_rate, "template:", item.item_tax_template);
 			} else {
-				console.warn("[TAX DEBUG] no match for posa_row_id:", item.posa_row_id, "item:", item.item_code);
+				// console.warn("[TAX DEBUG] no match for posa_row_id:", item.posa_row_id, "item:", item.item_code);
 			}
 		}
 	},

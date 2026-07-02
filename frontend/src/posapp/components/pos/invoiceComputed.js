@@ -21,15 +21,32 @@ export default {
 		});
 		return this.flt(sum, this.currency_precision);
 	},
-	// Calculate subtotal after discounts and delivery charges
+	// Calculate subtotal after discounts, delivery charges, and item-level taxes
 	subtotal() {
 		this.close_payments();
 		let sum = 0;
 		this.items.forEach((item) => {
-			// For returns, use absolute value for correct calculation
 			const qty = this.isReturnInvoice ? Math.abs(flt(item.qty)) : flt(item.qty);
 			const rate = flt(item.rate);
 			sum += qty * rate;
+
+			// Add item-level tax (synced from backend via _syncItemTaxAmounts)
+			const raw = item.item_tax_rate;
+			if (raw) {
+				let rates;
+				try {
+					rates = typeof raw === "string" ? JSON.parse(raw) : raw;
+				} catch {
+					rates = null;
+				}
+				if (rates && Object.keys(rates).length) {
+					const amount = qty * rate;
+					sum += Object.values(rates).reduce(
+						(s, r) => s + (amount * parseFloat(r || 0)) / 100,
+						0,
+					);
+				}
+			}
 		});
 
 		// Subtract additional discount
