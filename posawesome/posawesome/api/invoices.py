@@ -370,6 +370,14 @@ def update_invoice(data):
     invoice_doc.ignore_pricing_rule = 1
     invoice_doc.flags.ignore_pricing_rule = True
 
+    # set_pos_fields() does not carry update_stock over from the POS Profile, so a
+    # plain sale would otherwise fall back to the docfield default of 0 and skip
+    # both the stock ledger and _validate_stock_on_invoice().
+    if invoice_doc.doctype == "Sales Invoice" and "update_stock" not in data and invoice_doc.pos_profile:
+        invoice_doc.update_stock = cint(
+            frappe.db.get_value("POS Profile", invoice_doc.pos_profile, "update_stock")
+        )
+
     # Set missing values first
     invoice_doc.set_missing_values()
 
