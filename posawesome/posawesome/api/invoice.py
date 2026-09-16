@@ -5,7 +5,7 @@
 import frappe
 from frappe import _
 from frappe.model.mapper import get_mapped_doc
-from frappe.utils import add_days, flt
+from frappe.utils import add_days, cint, flt
 
 from posawesome.posawesome.api.utilities import get_company_domain  # Updated import
 from posawesome.posawesome.doctype.delivery_charges.delivery_charges import (
@@ -19,6 +19,7 @@ def validate(doc, method):
     set_patient(doc)
     auto_set_delivery_charges(doc)
     calc_delivery_charges(doc)
+    calc_fbr_fee(doc)
     apply_tax_inclusive(doc)
 
 
@@ -231,6 +232,98 @@ def calc_delivery_charges(doc):
 
     if calculate_taxes_and_totals:
         doc.calculate_taxes_and_totals()
+
+
+# Shown on the invoice tax table and on the POS receipt.
+FBR_FEE_DESCRIPTION = "POS Service Fee"
+FBR_FEE_ACCOUNT_FIELD = "custom_fbr_1_ruppe_gl_account"
+
+
+def get_fbr_fee_settings(pos_profile):
+    """Return (apply, rate, account) for the FBR fee on a POS Profile."""
+    if not pos_profile:
+        return 0, 0, None
+    settings = frappe.get_cached_value(
+        "POS Profile",
+        pos_profile,
+        ["posa_apply_fbr_fee", "posa_fbr_fee_rate", FBR_FEE_ACCOUNT_FIELD],
+        as_dict=True,
+    )
+    if not settings or not settings.get("posa_apply_fbr_fee"):
+        return 0, 0, None
+    return (
+        1,
+        flt(settings.get("posa_fbr_fee_rate")),
+        settings.get(FBR_FEE_ACCOUNT_FIELD),
+    )
+
+
+def calc_fbr_fee(doc):
+    """Add the fixed FBR fee as the last Actual charge on the invoice."""
+    if not doc.pos_profile:
+        return
+
+    apply_fee, rate, account = get_fbr_fee_settings(doc.pos_profile)
+
+    # The cashier can waive the fee for a single invoice. Only an explicit 0
+    # overrides the profile — an unset field keeps the profile's default.
+    if apply_fee and doc.get("posa_apply_fbr_fee") is not None:
+        if not cint(doc.get("posa_apply_fbr_fee")):
+            apply_fee = 0
+
+    existing = next(
+        (
+            i
+            for i in doc.get("taxes", [])
+            if i.charge_type == "Actual" and i.description == FBR_FEE_DESCRIPTION
+        ),
+        None,
+    )
+
+    # Returns mirror the original sale, so the fee is credited back with it.
+    if apply_fee and doc.is_return:
+        rate = -abs(rate)
+
+    if not apply_fee or not rate:
+        if existing:
+            doc.taxes.remove(existing)
+            doc.calculate_taxes_and_totals()
+        return
+
+    if not account:
+        frappe.throw(
+            _("Please set the FBR 1 Ruppe GL Account in POS Profile {0}").format(doc.pos_profile)
+        )
+
+    cost_center = frappe.get_cached_value("POS Profile", doc.pos_profile, "cost_center")
+    if not cost_center:
+        cost_center = frappe.get_cached_value("Company", doc.company, "cost_center")
+
+    # The fee must always be the last row, so drop any existing one and
+    # re-append it rather than updating it in place.
+    if existing:
+        unchanged = flt(existing.tax_amount) == flt(rate) and existing.account_head == account
+        is_last = doc.taxes[-1] is existing
+        if unchanged and is_last:
+            return
+        doc.taxes.remove(existing)
+
+    doc.append(
+        "taxes",
+        {
+            "charge_type": "Actual",
+            "description": FBR_FEE_DESCRIPTION,
+            "tax_amount": rate,
+            "account_head": account,
+            "cost_center": cost_center,
+        },
+    )
+
+    # Renumber so the re-appended row shows last in the grid.
+    for idx, row in enumerate(doc.taxes, start=1):
+        row.idx = idx
+
+    doc.calculate_taxes_and_totals()
 
 
 def apply_tax_inclusive(doc):

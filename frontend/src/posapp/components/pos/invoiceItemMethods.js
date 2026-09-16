@@ -8,6 +8,8 @@ import {
 	getOfflineCustomers,
 	getTaxTemplate,
 	getTaxInclusiveSetting,
+	getItemTaxRate,
+	setItemTaxRates,
 } from "../../../offline/index.js";
 
 // Import composables
@@ -15,6 +17,24 @@ import { useBatchSerial } from "../../composables/useBatchSerial.js";
 import { useDiscounts } from "../../composables/useDiscounts.js";
 import { useItemAddition } from "../../composables/useItemAddition.js";
 import { useStockUtils } from "../../composables/useStockUtils.js";
+
+// Must match FBR_FEE_DESCRIPTION in posawesome/posawesome/api/invoice.py
+const FBR_FEE_DESCRIPTION = "POS Service Fee";
+
+// item_tax_rate arrives as a JSON string from the server but may already be an
+// object once cached. Returns the rate map, or null when there is none.
+function parseItemTaxRate(raw) {
+	if (!raw) return null;
+	let rates = raw;
+	if (typeof raw === "string") {
+		try {
+			rates = JSON.parse(raw);
+		} catch {
+			return null;
+		}
+	}
+	return rates && Object.keys(rates).length ? rates : null;
+}
 
 const { setSerialNo, setBatchQty } = useBatchSerial();
 const { updateDiscountAmount, calcPrices, calcItemPrice } = useDiscounts();
@@ -41,6 +61,10 @@ export default {
 		// Requires a customer because ERPNext's withholding tax validation throws without one.
 		if (this.customer && this.items.length) {
 			this.update_invoice(this.get_invoice_doc());
+		} else if (isOffline() && this.items.length) {
+			// Offline there is no server round trip to gate on, so fill the rates
+			// straight from cache and the tax column works without a customer.
+			this._applyCachedItemTaxRates();
 		}
 		return res;
 	},
@@ -441,18 +465,64 @@ export default {
 			doc.total_taxes_and_charges = totalTax;
 		} else if (isOffline()) {
 			const tmpl = getTaxTemplate(this.pos_profile.taxes_and_charges);
+			const inclusive = getTaxInclusiveSetting();
+			let runningTotal = grandTotal;
+			let totalTax = 0;
+
+			// Items carrying their own Item Tax Template are taxed at their own
+			// rate; the profile template applies only to the rest. This mirrors
+			// the server, which resolves per-item templates in
+			// _resolve_item_tax_templates() and appends a row per account head.
+			const perItemTax = {};
+			let untemplatedNet = 0;
+			this.items.forEach((item) => {
+				const qty = this.isReturnInvoice ? Math.abs(flt(item.qty)) : flt(item.qty);
+				const amount = qty * flt(item.rate);
+				const rates = parseItemTaxRate(item.item_tax_rate);
+				if (!rates) {
+					untemplatedNet += amount;
+					return;
+				}
+				Object.entries(rates).forEach(([account_head, rate]) => {
+					const tax_amount = inclusive
+						? flt((amount * flt(rate)) / (100 + flt(rate)))
+						: flt((amount * flt(rate)) / 100);
+					perItemTax[account_head] = flt(perItemTax[account_head]) + tax_amount;
+				});
+			});
+
+			// Several items can share one account head at different rates, so the
+			// row carries no rate of its own — the server does the same in
+			// _resolve_item_tax_templates() and lets the amount speak for itself.
+			Object.entries(perItemTax).forEach(([account_head, tax_amount]) => {
+				// Not added to runningTotal: subtotal already includes item-level tax.
+				totalTax += tax_amount;
+				doc.taxes.push({
+					account_head,
+					charge_type: "On Net Total",
+					description: String(account_head).split(" - ")[0],
+					rate: 0,
+					included_in_print_rate: inclusive ? 1 : 0,
+					tax_amount: tax_amount,
+					total: runningTotal,
+					base_tax_amount: tax_amount * (this.exchange_rate || 1),
+					base_total: runningTotal * (this.exchange_rate || 1),
+				});
+			});
+
 			if (tmpl && Array.isArray(tmpl.taxes)) {
-				const inclusive = getTaxInclusiveSetting();
-				let runningTotal = grandTotal;
-				let totalTax = 0;
+				// Discounts and delivery charges are not item amounts, so fold the
+				// difference into the base the profile template is charged on.
+				const nonItemNet = flt(doc.net_total) - flt(this.Total);
+				const profileBase = untemplatedNet + nonItemNet;
 				tmpl.taxes.forEach((row) => {
 					let tax_amount = 0;
 					if (row.charge_type === "Actual") {
 						tax_amount = flt(row.tax_amount || 0);
 					} else if (inclusive) {
-						tax_amount = flt((doc.total * flt(row.rate)) / 100);
+						tax_amount = flt((profileBase * flt(row.rate)) / (100 + flt(row.rate)));
 					} else {
-						tax_amount = flt((doc.net_total * flt(row.rate)) / 100);
+						tax_amount = flt((profileBase * flt(row.rate)) / 100);
 					}
 					if (!inclusive) {
 						runningTotal += tax_amount;
@@ -470,14 +540,42 @@ export default {
 						base_total: runningTotal * (this.exchange_rate || 1),
 					});
 				});
-				if (inclusive) {
-					doc.net_total = doc.total - totalTax;
-					doc.base_net_total = doc.net_total * (this.exchange_rate || 1);
-					grandTotal = doc.total;
-				} else {
-					grandTotal = runningTotal;
+			}
+
+			if (inclusive) {
+				doc.net_total = doc.total - totalTax;
+				doc.base_net_total = doc.net_total * (this.exchange_rate || 1);
+				grandTotal = doc.total;
+			} else {
+				grandTotal = runningTotal;
+			}
+			doc.total_taxes_and_charges = totalTax;
+		}
+
+		// FBR fee: mirrored from calc_fbr_fee() in api/invoice.py so offline
+		// invoices carry it too — they never run the server validate hook.
+		// Always pushed last, matching the server's ordering.
+		if (this.pos_profile.posa_apply_fbr_fee) {
+			const fbrRate = flt(this.pos_profile.posa_fbr_fee_rate);
+			if (fbrRate) {
+				const existingFbr = doc.taxes.find(
+					(tax) => tax.charge_type === "Actual" && tax.description === FBR_FEE_DESCRIPTION,
+				);
+				if (!existingFbr) {
+					grandTotal += fbrRate;
+					doc.total_taxes_and_charges = flt(doc.total_taxes_and_charges) + fbrRate;
+					doc.taxes.push({
+						account_head: this.pos_profile.custom_fbr_1_ruppe_gl_account,
+						charge_type: "Actual",
+						description: FBR_FEE_DESCRIPTION,
+						rate: 0,
+						included_in_print_rate: 0,
+						tax_amount: fbrRate,
+						total: grandTotal,
+						base_tax_amount: fbrRate * (this.exchange_rate || 1),
+						base_total: grandTotal * (this.exchange_rate || 1),
+					});
 				}
-				doc.total_taxes_and_charges = totalTax;
 			}
 		}
 
@@ -883,12 +981,27 @@ export default {
 		}
 	},
 
+	// Offline counterpart of _syncItemTaxAmounts: fill item_tax_rate from the
+	// rates cached while online, so computeItemTaxAmount and subtotal work.
+	_applyCachedItemTaxRates() {
+		for (const item of this.items) {
+			if (parseItemTaxRate(item.item_tax_rate)) continue;
+
+			const cached = getItemTaxRate(item.item_code);
+			if (cached) {
+				item.item_tax_rate = cached.item_tax_rate || "{}";
+				item.item_tax_template = cached.item_tax_template || "";
+			}
+		}
+	},
+
 	// Update invoice in backend
 	update_invoice(doc) {
 		var vm = this;
 		if (isOffline()) {
 			// When offline, simply merge the passed doc with the current invoice_doc
 			// to allow offline invoice creation without server calls
+			vm._applyCachedItemTaxRates();
 			vm.invoice_doc = Object.assign({}, vm.invoice_doc || {}, doc);
 			return vm.invoice_doc;
 		}
@@ -1392,12 +1505,47 @@ export default {
 					}
 				});
 			}
+
+			this.cache_item_tax_rates(items.map((it) => it.item_code));
 		} catch (error) {
 			console.error("Error updating items:", error);
 			this.eventBus.emit("show_message", {
 				title: __("Error updating item details"),
 				color: "error",
 			});
+		}
+	},
+
+	// Resolve and cache each item's tax template while online. Offline invoices
+	// never reach the server, so without this the tax column stays empty.
+	async cache_item_tax_rates(item_codes) {
+		if (isOffline() || !this.pos_profile) return;
+
+		const codes = [...new Set((item_codes || []).filter(Boolean))].filter(
+			(code) => !getItemTaxRate(code),
+		);
+		if (!codes.length) return;
+
+		try {
+			const r = await frappe.call({
+				method: "posawesome.posawesome.api.items.get_item_tax_templates",
+				args: {
+					pos_profile: JSON.stringify(this.pos_profile),
+					item_codes: JSON.stringify(codes),
+				},
+			});
+			if (r?.message) {
+				// Items with no template resolve to nothing; remember that too so
+				// they are not looked up again on every add.
+				const resolved = r.message;
+				const rates = {};
+				codes.forEach((code) => {
+					rates[code] = resolved[code] || { item_tax_template: "", item_tax_rate: "{}" };
+				});
+				setItemTaxRates(rates);
+			}
+		} catch (e) {
+			console.error("Failed to cache item tax rates", e);
 		}
 	},
 

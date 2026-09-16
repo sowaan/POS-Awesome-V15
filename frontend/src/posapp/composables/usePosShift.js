@@ -15,6 +15,24 @@ export function usePosShift(openDialog) {
 	const pos_profile = ref(null);
 	const pos_opening_shift = ref(null);
 
+	// Cache the profile's tax template so offline invoices can apply it. Runs on
+	// the cached-profile path too: a cold start offline has nothing cached yet.
+	function cacheTaxTemplate(profile) {
+		if (!profile?.taxes_and_charges) return;
+		frappe.call({
+			method: "frappe.client.get",
+			args: {
+				doctype: "Sales Taxes and Charges Template",
+				name: profile.taxes_and_charges,
+			},
+			callback: (res) => {
+				if (res.message) {
+					setTaxTemplate(profile.taxes_and_charges, res.message);
+				}
+			},
+		});
+	}
+
 	async function check_opening_entry() {
 		await initPromise;
 		await checkDbHealth();
@@ -26,20 +44,7 @@ export function usePosShift(openDialog) {
 				if (r.message) {
 					pos_profile.value = r.message.pos_profile;
 					pos_opening_shift.value = r.message.pos_opening_shift;
-					if (pos_profile.value.taxes_and_charges) {
-						frappe.call({
-							method: "frappe.client.get",
-							args: {
-								doctype: "Sales Taxes and Charges Template",
-								name: pos_profile.value.taxes_and_charges,
-							},
-							callback: (res) => {
-								if (res.message) {
-									setTaxTemplate(pos_profile.value.taxes_and_charges, res.message);
-								}
-							},
-						});
-					}
+					cacheTaxTemplate(pos_profile.value);
 					eventBus?.emit("register_pos_profile", r.message);
 					eventBus?.emit("set_company", r.message.company);
 					try {
@@ -58,6 +63,7 @@ export function usePosShift(openDialog) {
 					if (data) {
 						pos_profile.value = data.pos_profile;
 						pos_opening_shift.value = data.pos_opening_shift;
+						cacheTaxTemplate(pos_profile.value);
 						eventBus?.emit("register_pos_profile", data);
 						eventBus?.emit("set_company", data.company);
 						try {

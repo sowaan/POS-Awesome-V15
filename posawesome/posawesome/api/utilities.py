@@ -54,7 +54,16 @@ def get_root_of(doctype):
 
 
 def get_child_nodes(group_type, root):
-    lft, rgt = frappe.db.get_value(group_type, root, ["lft", "rgt"])
+    bounds = frappe.db.get_value(group_type, root, ["lft", "rgt"])
+    if not bounds:
+        # A renamed or deleted group must not break the whole request.
+        frappe.log_error(
+            title="POS Awesome: missing group",
+            message=f"{group_type} {root!r} referenced by a POS Profile no longer exists",
+        )
+        return []
+
+    lft, rgt = bounds
     return frappe.get_all(
         group_type,
         filters={"lft": [">=", lft], "rgt": ["<=", rgt]},

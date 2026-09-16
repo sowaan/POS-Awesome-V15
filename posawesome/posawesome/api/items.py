@@ -8,7 +8,11 @@ from erpnext.stock.doctype.batch.batch import (
     get_batch_no,
     get_batch_qty,
 )
-from erpnext.stock.get_item_details import get_item_details
+from erpnext.stock.get_item_details import (
+    get_item_details,
+    get_item_tax_map,
+    get_item_tax_template,
+)
 from frappe import _
 from frappe.utils import cstr, flt, get_datetime, nowdate
 from frappe.utils.background_jobs import enqueue
@@ -406,6 +410,58 @@ def get_items_groups():
 		where is_group = 0 order by name limit 500""",
         as_dict=1,
     )
+
+
+@frappe.whitelist()
+def get_item_tax_templates(pos_profile, item_codes=None):
+    """Resolve the item tax template and rate map for each item code.
+
+    Called while online so the result can be cached for offline use — offline
+    invoices never reach the server, so they cannot resolve templates
+    themselves. Mirrors _resolve_item_tax_templates() in api/invoices.py.
+
+    Returns {item_code: {"item_tax_template": str, "item_tax_rate": json str}}.
+    """
+    if isinstance(pos_profile, str):
+        pos_profile = json.loads(pos_profile)
+    if isinstance(item_codes, str):
+        try:
+            item_codes = json.loads(item_codes)
+        except Exception:
+            item_codes = []
+
+    company = pos_profile.get("company")
+    if not company or not item_codes:
+        return {}
+
+    args_base = {
+        "company": company,
+        "posting_date": nowdate(),
+        "tax_category": "",
+    }
+
+    out = {}
+    for item_code in item_codes:
+        if not item_code:
+            continue
+        try:
+            template = get_item_tax_template(
+                frappe._dict(args_base, item_code=item_code, net_rate=0)
+            )
+            if not template:
+                continue
+            out[item_code] = {
+                "item_tax_template": template,
+                "item_tax_rate": get_item_tax_map(company, template, as_json=True),
+            }
+        except Exception:
+            # A single unresolvable item must not break the whole sync.
+            frappe.log_error(
+                title="POS Awesome: item tax template",
+                message=f"Failed to resolve item tax template for {item_code}\n\n{frappe.get_traceback()}",
+            )
+
+    return out
 
 
 @frappe.whitelist()

@@ -462,6 +462,15 @@
 					<v-col cols="6" v-if="pos_profile.posa_allow_credit_sale && !invoice_doc.is_return">
 						<v-switch v-model="is_credit_sale" :label="frappe._('Credit Sale?')"></v-switch>
 					</v-col>
+					<v-col cols="6" v-if="pos_profile.posa_apply_fbr_fee && !invoice_doc.is_return">
+						<v-switch
+							v-model="apply_fbr_fee"
+							flat
+							:label="frappe._('FBR Fee?')"
+							class="my-0 pa-1"
+							@update:model-value="on_fbr_fee_toggle"
+						></v-switch>
+					</v-col>
 					<v-col cols="6" v-if="invoice_doc.is_return && pos_profile.use_cashback">
 						<v-switch
 							v-model="is_cashback"
@@ -727,6 +736,8 @@ import {
 import renderOfflineInvoiceHTML from "../../../offline_print_template";
 import { silentPrint } from "../../plugins/print.js";
 
+// Must match FBR_FEE_DESCRIPTION in posawesome/posawesome/api/invoice.py
+const FBR_FEE_DESCRIPTION = "POS Service Fee";
 
 export default {
 	// Using format mixin for shared formatting methods
@@ -747,6 +758,7 @@ export default {
 			is_credit_sale: false, // Is this a credit sale?
 			is_write_off_change: false, // Write-off for change enabled
 			is_cashback: true, // Cashback enabled
+			apply_fbr_fee: false, // FBR fee applied (defaulted from POS Profile)
 			is_credit_return: false, // Is this a credit return?
 			redeem_customer_credit: false, // Redeem customer credit?
 			customer_credit_dict: [], // List of available customer credits
@@ -1041,6 +1053,72 @@ export default {
 		},
 	},
 	methods: {
+		// Add or remove the FBR fee when the cashier toggles it. The payment
+		// screen reads grand_total/rounded_total directly and never recalculates
+		// taxes, so the totals have to be adjusted here or the amount due would
+		// still include a waived fee.
+		on_fbr_fee_toggle(value) {
+			if (!this.invoice_doc || this.invoice_doc.is_return) return;
+
+			const rate = this.flt(this.pos_profile.posa_fbr_fee_rate);
+			if (!rate) return;
+
+			const taxes = this.invoice_doc.taxes || (this.invoice_doc.taxes = []);
+			const existing = taxes.find(
+				(tax) => tax.charge_type === "Actual" && tax.description === FBR_FEE_DESCRIPTION,
+			);
+
+			if (value && !existing) {
+				// Always last, matching calc_fbr_fee() on the server.
+				taxes.push({
+					account_head: this.pos_profile.custom_fbr_1_ruppe_gl_account,
+					charge_type: "Actual",
+					description: FBR_FEE_DESCRIPTION,
+					rate: 0,
+					included_in_print_rate: 0,
+					tax_amount: rate,
+					total: this.flt(this.invoice_doc.grand_total) + rate,
+					base_tax_amount: rate,
+					base_total: this.flt(this.invoice_doc.base_grand_total) + rate,
+				});
+				this.adjust_totals_by(rate);
+			} else if (!value && existing) {
+				taxes.splice(taxes.indexOf(existing), 1);
+				this.adjust_totals_by(-this.flt(existing.tax_amount));
+			}
+
+			this.invoice_doc.posa_apply_fbr_fee = value ? 1 : 0;
+			this.refresh_default_payment();
+		},
+
+		// Shift the invoice totals by a fee that was just added or removed.
+		adjust_totals_by(delta) {
+			const doc = this.invoice_doc;
+			doc.total_taxes_and_charges = this.flt(doc.total_taxes_and_charges) + delta;
+			doc.grand_total = this.flt(doc.grand_total) + delta;
+			doc.base_grand_total = this.flt(doc.base_grand_total) + delta;
+			if (doc.rounded_total) {
+				// The fee is a whole-currency amount, so shifting the rounded
+				// total by the same delta keeps it consistent with grand_total.
+				doc.rounded_total = this.flt(doc.rounded_total) + delta;
+				doc.base_rounded_total = this.flt(doc.base_rounded_total) + delta;
+			}
+		},
+
+		// Keep the cash line in step with the new total, as the credit-sale
+		// watcher does.
+		refresh_default_payment() {
+			if (this.is_credit_sale) return;
+			const total = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+			const default_payment = this.invoice_doc.payments.find((payment) => payment.default === 1);
+			if (default_payment) {
+				default_payment.amount = this.flt(total, this.currency_precision);
+				if (default_payment.base_amount !== undefined) {
+					default_payment.base_amount = this.flt(total, this.currency_precision);
+				}
+			}
+		},
+
 		// Go back to invoice view and reset customer readonly
 		back_to_invoice() {
 			this.eventBus.emit("show_payment", "false");
@@ -1292,6 +1370,12 @@ export default {
 				});
 			}
 
+			// Carry the cashier's FBR fee choice through to calc_fbr_fee() on the
+			// server, and into the payload saved offline.
+			if (this.pos_profile.posa_apply_fbr_fee && !this.invoice_doc.is_return) {
+				this.invoice_doc.posa_apply_fbr_fee = this.apply_fbr_fee ? 1 : 0;
+			}
+
 			// Build data payload
 			const data = {
 				total_change: !this.invoice_doc.is_return ? -this.diff_payment : 0,
@@ -1317,8 +1401,9 @@ export default {
 
 					// Only launch print asynchronously without blocking the flow
 					if (print) {
-						this.print_offline_invoice(this.invoice_doc)
-							.catch(err => console.error("Print failed:", err));
+						this.print_offline_invoice(this.invoice_doc).catch((err) =>
+							console.error("Print failed:", err),
+						);
 					}
 
 					// Clear invoice and reset UI
@@ -1329,7 +1414,6 @@ export default {
 					vm.loading = false;
 
 					return;
-
 				} catch (error) {
 					vm.eventBus.emit("show_message", {
 						title: __("Cannot Save Offline Invoice: ") + (error.message || __("Unknown error")),
@@ -1367,7 +1451,8 @@ export default {
 							// Fix payment amounts for return invoice
 							vm.invoice_doc.payments.forEach((payment) => {
 								if (payment.amount > 0) payment.amount = -Math.abs(payment.amount);
-								if (payment.base_amount > 0) payment.base_amount = -Math.abs(payment.base_amount);
+								if (payment.base_amount > 0)
+									payment.base_amount = -Math.abs(payment.base_amount);
 							});
 
 							// Retry submission
@@ -1375,7 +1460,6 @@ export default {
 							setTimeout(() => {
 								vm.submit_invoice(print);
 							}, 500);
-
 						} else {
 							vm.eventBus.emit("show_message", {
 								title: __("Error submitting invoice: ") + errorMsg,
@@ -1970,6 +2054,9 @@ export default {
 				const default_payment = this.invoice_doc.payments.find((payment) => payment.default === 1);
 				this.is_credit_sale = false;
 				this.is_write_off_change = false;
+				// Re-default per invoice: waiving the fee on one sale must not
+				// carry over to the next.
+				this.apply_fbr_fee = !!this.pos_profile.posa_apply_fbr_fee;
 				if (invoice_doc.is_return) {
 					this.is_return = true;
 					this.is_credit_return = false;
@@ -2004,6 +2091,7 @@ export default {
 			});
 			this.eventBus.on("register_pos_profile", (data) => {
 				this.pos_profile = data.pos_profile;
+				this.apply_fbr_fee = !!this.pos_profile.posa_apply_fbr_fee;
 				this.stock_settings = data.stock_settings || {};
 				this.get_mpesa_modes();
 			});

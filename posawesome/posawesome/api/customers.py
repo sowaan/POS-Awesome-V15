@@ -14,20 +14,59 @@ from frappe.utils.caching import redis_cache
 from .utils import get_active_pos_profile
 
 
+# Used as the sole "group" when a profile restricts customers to groups that no
+# longer exist. Callers filter on it and correctly match nothing, instead of
+# dropping the filter and exposing every customer on the site.
+UNRESOLVABLE_CUSTOMER_GROUP = "__posa_unresolvable_customer_group__"
+
+
 def get_customer_groups(pos_profile):
-    customer_groups = []
-    if pos_profile.get("customer_groups"):
-        # Get items based on the item groups defined in the POS profile
-        for data in pos_profile.get("customer_groups"):
-            customer_groups.extend(
-                [d.get("name") for d in get_child_nodes("Customer Group", data.get("customer_group"))]
+    # The client posts a cached copy of the POS Profile that can name groups
+    # since renamed or deleted, so re-read the child table by profile name and
+    # only fall back to what was posted when there is no name to look up.
+    declared = None
+    profile_name = pos_profile.get("name")
+    if profile_name:
+        declared = [
+            {"customer_group": g}
+            for g in frappe.get_all(
+                "POS Customer Group", filters={"parent": profile_name}, pluck="customer_group"
             )
+        ]
+    if declared is None:
+        declared = pos_profile.get("customer_groups")
+
+    if not declared:
+        return []
+
+    customer_groups = []
+    # Get items based on the item groups defined in the POS profile
+    for data in declared:
+        customer_groups.extend(
+            [d.get("name") for d in get_child_nodes("Customer Group", data.get("customer_group"))]
+        )
+
+    if not customer_groups:
+        # Every declared group is missing — most often a stale POS Profile cached
+        # by the client. Restricting to nothing is right; showing everyone is not.
+        return [UNRESOLVABLE_CUSTOMER_GROUP]
 
     return list(set(customer_groups))
 
 
 def get_child_nodes(group_type, root):
-    lft, rgt = frappe.db.get_value(group_type, root, ["lft", "rgt"])
+    bounds = frappe.db.get_value(group_type, root, ["lft", "rgt"])
+    if not bounds:
+        # The POS Profile can reference a group that was since renamed or
+        # deleted — and the client may post a stale cached profile. Skip it
+        # rather than failing the whole request.
+        frappe.log_error(
+            title="POS Awesome: missing group",
+            message=f"{group_type} {root!r} referenced by a POS Profile no longer exists",
+        )
+        return []
+
+    lft, rgt = bounds
     return frappe.get_all(
         group_type,
         filters={"lft": [">=", lft], "rgt": ["<=", rgt]},

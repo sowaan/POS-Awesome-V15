@@ -32,6 +32,8 @@ export const memory = {
 	sales_persons_storage: [],
 	item_details_cache: {},
 	tax_template_cache: {},
+	item_tax_rate_cache: {},
+	item_tax_template_cache: {},
 	translation_cache: {},
 	coupons_cache: {},
 	item_groups_cache: [],
@@ -351,6 +353,65 @@ export function setTaxTemplate(name, doc) {
 	}
 }
 
+export function getItemTaxTemplate(itemCode) {
+	try {
+		const cache = memory.item_tax_template_cache || {};
+		return cache[itemCode] || null;
+	} catch (e) {
+		console.error("Failed to get cached item tax template", e);
+		return null;
+	}
+}
+
+export function setItemTaxTemplates(map) {
+	try {
+		const cache = memory.item_tax_template_cache || {};
+		Object.entries(map || {}).forEach(([itemCode, data]) => {
+			if (itemCode && data) {
+				cache[itemCode] = {
+					item_tax_template: data.item_tax_template || "",
+					item_tax_rate: data.item_tax_rate || "{}",
+				};
+			}
+		});
+		memory.item_tax_template_cache = cache;
+		persist("item_tax_template_cache", memory.item_tax_template_cache);
+	} catch (e) {
+		console.error("Failed to cache item tax templates", e);
+	}
+}
+
+// Resolved item tax templates, keyed by item_code. Populated while online so
+// offline invoices can calculate per-item taxes without reaching the server.
+export function getItemTaxRate(itemCode) {
+	try {
+		const cache = memory.item_tax_rate_cache || {};
+		return cache[itemCode] || null;
+	} catch (e) {
+		console.error("Failed to get cached item tax rate", e);
+		return null;
+	}
+}
+
+export function setItemTaxRates(rates) {
+	try {
+		if (!rates || !Object.keys(rates).length) return;
+		const cache = memory.item_tax_rate_cache || {};
+		let clean;
+		try {
+			clean = JSON.parse(JSON.stringify(rates));
+		} catch (err) {
+			console.error("Failed to serialize item tax rates", err);
+			return;
+		}
+		Object.assign(cache, clean);
+		memory.item_tax_rate_cache = cache;
+		persist("item_tax_rate_cache", memory.item_tax_rate_cache);
+	} catch (e) {
+		console.error("Failed to cache item tax rates", e);
+	}
+}
+
 export function getPrintTemplate() {
 	try {
 		return memory.print_template || "";
@@ -505,6 +566,7 @@ export async function clearAllCache() {
 	memory.sales_persons_storage = [];
 	memory.item_details_cache = {};
 	memory.tax_template_cache = {};
+	memory.item_tax_rate_cache = {};
 	memory.item_groups_cache = [];
 	memory.cache_version = CACHE_VERSION;
 	memory.tax_inclusive = false;
@@ -544,6 +606,7 @@ export async function forceClearAllCache() {
 	memory.sales_persons_storage = [];
 	memory.item_details_cache = {};
 	memory.tax_template_cache = {};
+	memory.item_tax_rate_cache = {};
 	memory.item_groups_cache = [];
 	memory.cache_version = CACHE_VERSION;
 	memory.tax_inclusive = false;

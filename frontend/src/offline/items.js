@@ -137,6 +137,9 @@ export function saveItemDetailsCache(profileName, priceList, items) {
 				rate: it.rate,
 				price_list_rate: it.price_list_rate,
 				currency: it.currency,
+				// Kept so taxes can be calculated while offline
+				item_tax_template: it.item_tax_template,
+				item_tax_rate: it.item_tax_rate,
 			}));
 			cleanItems = JSON.parse(JSON.stringify(cleanItems));
 		} catch (err) {

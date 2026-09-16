@@ -68,7 +68,10 @@
 								ref="debounce_search"
 							>
 								<!-- Add camera scan button if enabled -->
-								<template v-slot:append-inner v-if="pos_profile && pos_profile.posa_enable_camera_scanning">
+								<template
+									v-slot:append-inner
+									v-if="pos_profile && pos_profile.posa_enable_camera_scanning"
+								>
 									<v-btn
 										icon="mdi-camera"
 										size="small"
@@ -398,7 +401,11 @@
 						v-model="item_group"
 					></v-select>
 				</v-col>
-				<v-col cols="12" class="mb-2" v-if="!pos_profile || pos_profile.posa_enable_price_list_dropdown !== false">
+				<v-col
+					cols="12"
+					class="mb-2"
+					v-if="!pos_profile || pos_profile.posa_enable_price_list_dropdown !== false"
+				>
 					<v-text-field
 						density="compact"
 						variant="solo"
@@ -481,6 +488,8 @@ import {
 	isStockCacheReady,
 	getCachedItemDetails,
 	saveItemDetailsCache,
+	getItemTaxRate,
+	setItemTaxRates,
 	saveItemGroups,
 	getCachedItemGroups,
 	getItemsLastSync,
@@ -1166,6 +1175,7 @@ export default {
 					updates.forEach(({ item, upd }) => Object.assign(item, upd));
 					updateLocalStockCache(details);
 					saveItemDetailsCache(vm.pos_profile.name, vm.active_price_list, details);
+					vm.cacheItemTaxRates(details.map((d) => d.item_code));
 					if (
 						vm.pos_profile &&
 						vm.pos_profile.posa_local_storage &&
@@ -1186,6 +1196,41 @@ export default {
 					console.error("Error fetching item details:", err);
 					vm.loading = false;
 				}
+			}
+		},
+
+		// Cache each loaded item's tax template while online. Offline invoices
+		// never reach the server, so an item whose rate was never cached shows
+		// no tax at all. Done per loaded batch — resolving the whole catalog in
+		// one call takes minutes.
+		async cacheItemTaxRates(item_codes) {
+			if (isOffline() || !this.pos_profile) return;
+
+			const codes = [...new Set((item_codes || []).filter(Boolean))].filter(
+				(code) => !getItemTaxRate(code),
+			);
+			if (!codes.length) return;
+
+			try {
+				const r = await frappe.call({
+					method: "posawesome.posawesome.api.items.get_item_tax_templates",
+					args: {
+						pos_profile: JSON.stringify(this.pos_profile),
+						item_codes: JSON.stringify(codes),
+					},
+				});
+				if (r?.message) {
+					const resolved = r.message;
+					// Items with no template resolve to nothing; remember that too
+					// so they are not looked up again on every reload.
+					const rates = {};
+					codes.forEach((code) => {
+						rates[code] = resolved[code] || { item_tax_template: "", item_tax_rate: "{}" };
+					});
+					setItemTaxRates(rates);
+				}
+			} catch (e) {
+				console.error("Failed to cache item tax rates", e);
 			}
 		},
 
@@ -2237,6 +2282,7 @@ export default {
 
 					updateLocalStockCache(details);
 					saveItemDetailsCache(vm.pos_profile.name, vm.active_price_list, details);
+					vm.cacheItemTaxRates(details.map((d) => d.item_code));
 
 					if (
 						vm.pos_profile &&

@@ -66,9 +66,9 @@
 					<v-list-item-subtitle v-if="item.raw.customer_name !== item.raw.name">
 						<div v-html="`ID: ${item.raw.name}`"></div>
 					</v-list-item-subtitle>
-					<v-list-item-subtitle >
-						<div v-html="`Customer Group: ${item.raw.customer_group  || '-' }`"></div>
-					</v-list-item-subtitle>						
+					<v-list-item-subtitle>
+						<div v-html="`Customer Group: ${item.raw.customer_group || '-'}`"></div>
+					</v-list-item-subtitle>
 					<v-list-item-subtitle v-if="item.raw.tax_id">
 						<div v-html="`TAX ID: ${item.raw.tax_id}`"></div>
 					</v-list-item-subtitle>
@@ -473,7 +473,10 @@ export default {
 							this.eventBus.emit("data-loaded", "customers");
 						}
 						await this.searchCustomers(this.searchTerm);
-					} else if (serverCount < localCount) {
+					} else if (serverCount > 0 && serverCount < localCount) {
+						// Only resync when the server genuinely has fewer customers.
+						// A zero here means the request could not resolve them, and
+						// wiping local storage on that would lose the list entirely.
 						await clearCustomerStorage();
 						setCustomersLastSync(null);
 						this.customers = [];
@@ -512,7 +515,10 @@ export default {
 				await this.verifyServerCustomerCount();
 				return;
 			}
-			const syncSince = getCustomersLastSync();
+			// Local storage is empty, so an incremental sync would ask only for
+			// customers modified since the last sync and store nothing — leaving
+			// the list permanently empty. Start from scratch instead.
+			const syncSince = null;
 			this.loadProgress = 0;
 			this.eventBus.emit("data-load-progress", { name: "customers", progress: 0 });
 			this.loadingCustomers = true;
