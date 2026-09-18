@@ -298,9 +298,28 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
     return {"valid": True}
 
 
+def _drop_stale_timestamps(data):
+    """Remove the client's `modified` before merging it into a fresh document.
+
+    The POS keeps its own copy of the invoice and posts it back on every change.
+    `Document.update()` copies every key, so that stale `modified` would replace
+    the timestamp of the document just loaded from the database and the next
+    save would raise TimestampMismatchError ("Document has been modified after
+    you have opened it"). The terminal owns its draft, so the database value is
+    the one to trust.
+    """
+    if isinstance(data, dict):
+        data.pop("modified", None)
+        for row in data.get("items") or []:
+            if isinstance(row, dict):
+                row.pop("modified", None)
+    return data
+
+
 @frappe.whitelist()
 def update_invoice(data):
     data = json.loads(data)
+    _drop_stale_timestamps(data)
     # Determine doctype based on POS Profile setting
     pos_profile = data.get("pos_profile")
     doctype = "Sales Invoice"
@@ -505,6 +524,7 @@ def update_invoice(data):
 def submit_invoice(invoice, data):
     data = json.loads(data)
     invoice = json.loads(invoice)
+    _drop_stale_timestamps(invoice)
     pos_profile = invoice.get("pos_profile")
     doctype = "Sales Invoice"
     if pos_profile and frappe.db.get_value(
@@ -936,6 +956,7 @@ def get_sales_invoice_child_table(sales_invoice, sales_invoice_item):
 @frappe.whitelist()
 def update_invoice_from_order(data):
     data = json.loads(data)
+    _drop_stale_timestamps(data)
     invoice_doc = frappe.get_doc("Sales Invoice", data.get("name"))
     invoice_doc.update(data)
     invoice_doc.save()
