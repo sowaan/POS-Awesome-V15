@@ -1,14 +1,31 @@
 /* global frappe */
 import { getOpeningStorage, setPrintTemplate, setTermsAndConditions } from "../offline/index.js";
 
-async function cachePrintTemplateAndTerms(profile) {
+export async function cachePrintTemplateAndTerms(profile) {
 	if (!profile || typeof frappe === "undefined" || !navigator.onLine) return;
 
 	try {
-		// always use built-in offline template instead of cached print formats
-		setPrintTemplate("");
+		// Online printing prefers print_format_for_online, so cache that same
+		// format for locally-created invoices as well.
+		const printFormat = profile.print_format_for_online || profile.print_format;
+		if (printFormat) {
+			const pf = await frappe.call({
+				method: "frappe.client.get_value",
+				args: {
+					doctype: "Print Format",
+					fieldname: ["html", "css"],
+					filters: { name: printFormat },
+				},
+			});
+			if (pf.message?.html) {
+				const css = pf.message.css ? `<style>${pf.message.css}</style>` : "";
+				setPrintTemplate(`${css}${pf.message.html}`);
+			}
+		}
 	} catch (e) {
-		console.error("Failed to reset print template", e);
+		// Keep the last successfully cached template if a refresh fails. It is
+		// still a closer match than replacing it with the generic fallback.
+		console.error("Failed to fetch print format", e);
 	}
 
 	try {

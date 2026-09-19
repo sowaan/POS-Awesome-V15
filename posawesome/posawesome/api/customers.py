@@ -10,6 +10,7 @@ from frappe import _
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import (
     get_loyalty_program_details_with_points,
 )
+from erpnext.accounts.party import set_taxes
 from frappe.utils.caching import redis_cache
 from .utils import get_active_pos_profile
 
@@ -18,6 +19,41 @@ from .utils import get_active_pos_profile
 # longer exist. Callers filter on it and correctly match nothing, instead of
 # dropping the filter and exposing every customer on the site.
 UNRESOLVABLE_CUSTOMER_GROUP = "__posa_unresolvable_customer_group__"
+
+
+def _get_customer_tax_template(customer, company, posting_date=None):
+    """Resolve the same customer Tax Rule used by Sales/POS Invoice."""
+    if not customer or not company:
+        return None
+
+    return set_taxes(
+        customer.get("name"),
+        "Customer",
+        posting_date or nowdate(),
+        company,
+        customer_group=customer.get("customer_group"),
+        tax_category=customer.get("tax_category"),
+    )
+
+
+def _add_customer_tax_context(customers, company, posting_date=None):
+    for customer in customers:
+        try:
+            customer["taxes_and_charges"] = _get_customer_tax_template(
+                customer, company, posting_date
+            )
+        except Exception:
+            # A malformed Tax Rule must not make the customer list unusable.
+            customer["taxes_and_charges"] = None
+            frappe.log_error(
+                title="POS Awesome: customer tax context",
+                message=(
+                    f"Failed to resolve taxes for customer {customer.get('name')}\n\n"
+                    f"{frappe.get_traceback()}"
+                ),
+            )
+        customer["tax_context_cached"] = 1
+    return customers
 
 
 def get_customer_groups(pos_profile):
@@ -122,15 +158,16 @@ def get_customer_names(pos_profile, limit=None, offset=None, start_after=None, m
                 "mobile_no",
                 "email_id",
                 "tax_id",
+                "tax_category",
                 "customer_name",
                 "primary_address",
-                "customer_group"
+                "customer_group",
             ],
             order_by="name",
             limit_start=None if start_after else offset,
             limit_page_length=limit,
         )
-        return customers
+        return _add_customer_tax_context(customers, pos_profile.get("company"))
 
     if _pos_profile.get("posa_use_server_cache") and not (limit or offset or start_after or modified_after):
         return __get_customer_names(pos_profile, limit, offset, start_after, modified_after)
@@ -149,7 +186,7 @@ def get_customers_count(pos_profile):
 
 
 @frappe.whitelist()
-def get_customer_info(customer):
+def get_customer_info(customer, company=None, posting_date=None):
     customer = frappe.get_doc("Customer", customer)
 
     res = {"loyalty_points": None, "conversion_factor": None}
@@ -165,9 +202,25 @@ def get_customer_info(customer):
     res["birthday"] = customer.posa_birthday
     res["gender"] = customer.gender
     res["tax_id"] = customer.tax_id
+    res["tax_category"] = customer.tax_category
     res["posa_discount"] = customer.posa_discount
     res["name"] = customer.name
     res["customer_name"] = customer.customer_name
+
+    company = company or frappe.defaults.get_user_default("Company")
+    try:
+        taxes_and_charges = _get_customer_tax_template(customer, company, posting_date)
+    except Exception:
+        taxes_and_charges = None
+        frappe.log_error(
+            title="POS Awesome: customer tax context",
+            message=f"Failed to resolve taxes for customer {customer.name}\n\n{frappe.get_traceback()}",
+        )
+    res["taxes_and_charges"] = taxes_and_charges
+    if taxes_and_charges:
+        res["taxes_and_charges_template"] = frappe.get_doc(
+            "Sales Taxes and Charges Template", taxes_and_charges
+        ).as_dict()
     res["customer_group_price_list"] = frappe.get_value(
         "Customer Group", customer.customer_group, "default_price_list"
     )

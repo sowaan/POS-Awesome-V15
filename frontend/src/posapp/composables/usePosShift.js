@@ -7,6 +7,7 @@ import {
 	clearOpeningStorage,
 	setTaxTemplate,
 } from "../../offline/index.js";
+import { cachePrintTemplateAndTerms } from "../../utils/pos_profile.js";
 
 export function usePosShift(openDialog) {
 	const { proxy } = getCurrentInstance();
@@ -33,6 +34,11 @@ export function usePosShift(openDialog) {
 		});
 	}
 
+	function cacheProfileOfflineData(profile) {
+		cacheTaxTemplate(profile);
+		cachePrintTemplateAndTerms(profile).catch((e) => console.error("Failed to cache POS print data", e));
+	}
+
 	async function check_opening_entry() {
 		await initPromise;
 		await checkDbHealth();
@@ -44,7 +50,7 @@ export function usePosShift(openDialog) {
 				if (r.message) {
 					pos_profile.value = r.message.pos_profile;
 					pos_opening_shift.value = r.message.pos_opening_shift;
-					cacheTaxTemplate(pos_profile.value);
+					cacheProfileOfflineData(pos_profile.value);
 					eventBus?.emit("register_pos_profile", r.message);
 					eventBus?.emit("set_company", r.message.company);
 					try {
@@ -63,7 +69,7 @@ export function usePosShift(openDialog) {
 					if (data) {
 						pos_profile.value = data.pos_profile;
 						pos_opening_shift.value = data.pos_opening_shift;
-						cacheTaxTemplate(pos_profile.value);
+						cacheProfileOfflineData(pos_profile.value);
 						eventBus?.emit("register_pos_profile", data);
 						eventBus?.emit("set_company", data.company);
 						try {
@@ -82,6 +88,7 @@ export function usePosShift(openDialog) {
 				if (data) {
 					pos_profile.value = data.pos_profile;
 					pos_opening_shift.value = data.pos_opening_shift;
+					cacheProfileOfflineData(pos_profile.value);
 					eventBus?.emit("register_pos_profile", data);
 					eventBus?.emit("set_company", data.company);
 					try {

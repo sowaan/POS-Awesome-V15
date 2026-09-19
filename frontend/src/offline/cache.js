@@ -203,7 +203,11 @@ export async function setCustomerStorage(customers) {
 			email_id: c.email_id,
 			primary_address: c.primary_address,
 			tax_id: c.tax_id,
+			tax_category: c.tax_category,
+			taxes_and_charges: c.taxes_and_charges,
+			tax_context_cached: c.tax_context_cached,
 			customer_group: c.customer_group,
+			customer_price_list: c.customer_price_list,
 		}));
 		const CHUNK_SIZE = 1000;
 		await db.transaction("rw", db.table("customers"), async () => {
@@ -383,17 +387,18 @@ export function setItemTaxTemplates(map) {
 
 // Resolved item tax templates, keyed by item_code. Populated while online so
 // offline invoices can calculate per-item taxes without reaching the server.
-export function getItemTaxRate(itemCode) {
+export function getItemTaxRate(itemCode, taxCategory = "") {
 	try {
 		const cache = memory.item_tax_rate_cache || {};
-		return cache[itemCode] || null;
+		const contextKey = `${taxCategory || ""}::${itemCode}`;
+		return cache[contextKey] || (!taxCategory ? cache[itemCode] : null) || null;
 	} catch (e) {
 		console.error("Failed to get cached item tax rate", e);
 		return null;
 	}
 }
 
-export function setItemTaxRates(rates) {
+export function setItemTaxRates(rates, taxCategory = "") {
 	try {
 		if (!rates || !Object.keys(rates).length) return;
 		const cache = memory.item_tax_rate_cache || {};
@@ -404,7 +409,11 @@ export function setItemTaxRates(rates) {
 			console.error("Failed to serialize item tax rates", err);
 			return;
 		}
-		Object.assign(cache, clean);
+		Object.entries(clean).forEach(([itemCode, value]) => {
+			cache[`${taxCategory || ""}::${itemCode}`] = value;
+			// Preserve the legacy default-category keys during the transition.
+			if (!taxCategory) cache[itemCode] = value;
+		});
 		memory.item_tax_rate_cache = cache;
 		persist("item_tax_rate_cache", memory.item_tax_rate_cache);
 	} catch (e) {

@@ -70,6 +70,7 @@ import { useOffers } from "../../composables/useOffers.js";
 import { clearExpiredCustomerBalances } from "../../../offline/index.js";
 import { useResponsive } from "../../composables/useResponsive.js";
 import { useRtl } from "../../composables/useRtl.js";
+import { cachePrintTemplateAndTerms } from "../../../utils/pos_profile.js";
 
 export default {
 	setup() {
@@ -138,6 +139,9 @@ export default {
 			});
 			this.eventBus.on("register_pos_data", (data) => {
 				this.pos_profile = data.pos_profile;
+				cachePrintTemplateAndTerms(this.pos_profile).catch((e) =>
+					console.error("Failed to cache POS print data", e),
+				);
 				this.get_offers(this.pos_profile.name, this.pos_profile);
 				this.pos_opening_shift = data.pos_opening_shift;
 				this.eventBus.emit("register_pos_profile", data);

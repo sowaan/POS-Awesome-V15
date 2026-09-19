@@ -1,4 +1,4 @@
-const CACHE_NAME = "posawesome-cache-v1";
+const CACHE_NAME = "posawesome-cache-v2";
 const MAX_CACHE_ITEMS = 1000;
 
 async function enforceCacheLimit(cache) {
@@ -19,6 +19,7 @@ self.addEventListener("install", (event) => {
 			const resources = [
 				"/app/posapp",
 				"/assets/posawesome/dist/js/posawesome.umd.js",
+				"/assets/posawesome/images/fbr_loog.png",
 
 				"/assets/posawesome/dist/js/offline/index.js",
 

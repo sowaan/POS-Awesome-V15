@@ -153,8 +153,11 @@ import {
 	getCustomersLastSync,
 	setCustomersLastSync,
 	getCustomerStorageCount,
+	getCustomerStorage,
 	clearCustomerStorage,
 	isOffline,
+	getTaxTemplate,
+	setTaxTemplate,
 } from "../../../offline/index.js";
 import _ from "lodash";
 
@@ -488,6 +491,31 @@ export default {
 			}
 		},
 
+		async cacheCustomerTaxTemplates(customers) {
+			if (isOffline()) return;
+
+			const names = [
+				...new Set((customers || []).map((c) => c.taxes_and_charges).filter(Boolean)),
+			].filter((name) => !getTaxTemplate(name));
+
+			await Promise.all(
+				names.map(async (name) => {
+					try {
+						const response = await frappe.call({
+							method: "frappe.client.get",
+							args: {
+								doctype: "Sales Taxes and Charges Template",
+								name,
+							},
+						});
+						if (response.message) setTaxTemplate(name, response.message);
+					} catch (error) {
+						console.error(`Failed to cache customer tax template ${name}`, error);
+					}
+				}),
+			);
+		},
+
 		fetchCustomerPage(startAfter, modifiedAfter, limit) {
 			return new Promise((resolve, reject) => {
 				frappe.call({
@@ -498,7 +526,11 @@ export default {
 						limit,
 						start_after: startAfter,
 					},
-					callback: (r) => resolve(r.message || []),
+					callback: async (r) => {
+						const customers = r.message || [];
+						await this.cacheCustomerTaxTemplates(customers);
+						resolve(customers);
+					},
 					error: (err) => {
 						console.error("Failed to fetch customers", err);
 						reject(err);
@@ -508,7 +540,17 @@ export default {
 		},
 
 		async get_customer_names() {
-			const localCount = await getCustomerStorageCount();
+			let localCount = await getCustomerStorageCount();
+			if (localCount > 0 && !isOffline()) {
+				const sample = await getCustomerStorage(1);
+				if (!sample[0]?.tax_context_cached) {
+					// One-time refresh for customer caches created before offline
+					// tax contexts were stored.
+					await clearCustomerStorage();
+					setCustomersLastSync(null);
+					localCount = 0;
+				}
+			}
 			if (localCount > 0) {
 				this.customers_loaded = true;
 				await this.searchCustomers(this.searchTerm);

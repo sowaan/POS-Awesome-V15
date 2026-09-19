@@ -413,7 +413,7 @@ def get_items_groups():
 
 
 @frappe.whitelist()
-def get_item_tax_templates(pos_profile, item_codes=None):
+def get_item_tax_templates(pos_profile, item_codes=None, tax_category=None):
     """Resolve the item tax template and rate map for each item code.
 
     Called while online so the result can be cached for offline use — offline
@@ -437,7 +437,7 @@ def get_item_tax_templates(pos_profile, item_codes=None):
     args_base = {
         "company": company,
         "posting_date": nowdate(),
-        "tax_category": "",
+        "tax_category": tax_category or "",
     }
 
     out = {}

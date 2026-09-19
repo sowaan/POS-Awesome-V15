@@ -7,6 +7,7 @@ import {
 	getCustomerStorage,
 	getOfflineCustomers,
 	getTaxTemplate,
+	setTaxTemplate,
 	getTaxInclusiveSetting,
 	getItemTaxRate,
 	setItemTaxRates,
@@ -360,6 +361,7 @@ export default {
 	// Build the invoice document object for backend submission
 	get_invoice_doc() {
 		let doc = {};
+		if (isOffline()) this._applyCachedItemTaxRates(true);
 		if (this.invoice_doc.name) {
 			doc = { ...this.invoice_doc };
 		}
@@ -397,6 +399,9 @@ export default {
 		doc.selling_price_list = this.pos_profile.selling_price_list;
 		doc.naming_series = doc.naming_series || this.pos_profile.naming_series;
 		doc.customer = this.customer;
+		doc.tax_category = this.customer_info?.tax_category || "";
+		doc.taxes_and_charges =
+			this.customer_info?.taxes_and_charges || this.pos_profile.taxes_and_charges || "";
 
 		// Determine if this is a return invoice
 		const isReturn = this.isReturnInvoice;
@@ -443,7 +448,7 @@ export default {
 
 		// Prepare taxes array
 		doc.taxes = [];
-		if (this.invoice_doc && this.invoice_doc.taxes) {
+		if (!isOffline() && this.invoice_doc && this.invoice_doc.taxes) {
 			let totalTax = 0;
 			this.invoice_doc.taxes.forEach((tax) => {
 				if (tax.tax_amount) {
@@ -464,7 +469,9 @@ export default {
 			});
 			doc.total_taxes_and_charges = totalTax;
 		} else if (isOffline()) {
-			const tmpl = getTaxTemplate(this.pos_profile.taxes_and_charges);
+			const taxTemplateName =
+				this.customer_info?.taxes_and_charges || this.pos_profile.taxes_and_charges;
+			const tmpl = getTaxTemplate(taxTemplateName);
 			const inclusive = getTaxInclusiveSetting();
 			let runningTotal = grandTotal;
 			let totalTax = 0;
@@ -979,15 +986,26 @@ export default {
 				// console.warn("[TAX DEBUG] no match for posa_row_id:", item.posa_row_id, "item:", item.item_code);
 			}
 		}
+
+		const ratesByItemCode = {};
+		for (const item of doc.items) {
+			if (!item.item_code) continue;
+			ratesByItemCode[item.item_code] = {
+				item_tax_rate: item.item_tax_rate || "{}",
+				item_tax_template: item.item_tax_template || "",
+			};
+		}
+		setItemTaxRates(ratesByItemCode, doc.tax_category || this.customer_info?.tax_category || "");
 	},
 
 	// Offline counterpart of _syncItemTaxAmounts: fill item_tax_rate from the
 	// rates cached while online, so computeItemTaxAmount and subtotal work.
-	_applyCachedItemTaxRates() {
+	_applyCachedItemTaxRates(force = false) {
+		const taxCategory = this.customer_info?.tax_category || "";
 		for (const item of this.items) {
-			if (parseItemTaxRate(item.item_tax_rate)) continue;
+			if (!force && parseItemTaxRate(item.item_tax_rate)) continue;
 
-			const cached = getItemTaxRate(item.item_code);
+			const cached = getItemTaxRate(item.item_code, taxCategory) || getItemTaxRate(item.item_code);
 			if (cached) {
 				item.item_tax_rate = cached.item_tax_rate || "{}";
 				item.item_tax_template = cached.item_tax_template || "";
@@ -1518,11 +1536,11 @@ export default {
 
 	// Resolve and cache each item's tax template while online. Offline invoices
 	// never reach the server, so without this the tax column stays empty.
-	async cache_item_tax_rates(item_codes) {
+	async cache_item_tax_rates(item_codes, taxCategory = this.customer_info?.tax_category || "") {
 		if (isOffline() || !this.pos_profile) return;
 
 		const codes = [...new Set((item_codes || []).filter(Boolean))].filter(
-			(code) => !getItemTaxRate(code),
+			(code) => !getItemTaxRate(code, taxCategory),
 		);
 		if (!codes.length) return;
 
@@ -1532,6 +1550,7 @@ export default {
 				args: {
 					pos_profile: JSON.stringify(this.pos_profile),
 					item_codes: JSON.stringify(codes),
+					tax_category: taxCategory,
 				},
 			});
 			if (r?.message) {
@@ -1542,7 +1561,7 @@ export default {
 				codes.forEach((code) => {
 					rates[code] = resolved[code] || { item_tax_template: "", item_tax_rate: "{}" };
 				});
-				setItemTaxRates(rates);
+				setItemTaxRates(rates, taxCategory);
 			}
 		} catch (e) {
 			console.error("Failed to cache item tax rates", e);
@@ -1788,6 +1807,7 @@ export default {
 				);
 				if (cached) {
 					vm.customer_info = { ...cached };
+					vm._applyCachedItemTaxRates(true);
 					if (
 						vm.pos_profile.posa_force_price_from_customer_price_list !== false &&
 						cached.customer_price_list
@@ -1803,6 +1823,7 @@ export default {
 					.find((c) => c.customer_name === vm.customer);
 				if (queued) {
 					vm.customer_info = { ...queued, name: queued.customer_name };
+					vm._applyCachedItemTaxRates(true);
 					if (
 						vm.pos_profile.posa_force_price_from_customer_price_list !== false &&
 						queued.customer_price_list
@@ -1823,6 +1844,8 @@ export default {
 				method: "posawesome.posawesome.api.customers.get_customer_info",
 				args: {
 					customer: vm.customer,
+					company: vm.pos_profile.company,
+					posting_date: vm.formatDateForBackend(vm.posting_date),
 				},
 			});
 			const message = r.message;
@@ -1830,6 +1853,15 @@ export default {
 				vm.customer_info = {
 					...message,
 				};
+				if (message.taxes_and_charges && message.taxes_and_charges_template) {
+					setTaxTemplate(message.taxes_and_charges, message.taxes_and_charges_template);
+				}
+				if (vm.items?.length) {
+					await vm.cache_item_tax_rates(
+						vm.items.map((item) => item.item_code),
+						message.tax_category || "",
+					);
+				}
 			}
 			// When force reload is enabled, automatically switch to the
 			// customer's default price list so that item rates are fetched
