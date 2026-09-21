@@ -230,6 +230,7 @@ export function defaultOfflineHTML(invoice, terms = "") {
                 <th width="10%" style="padding:0px !important; border:none;" class="text-right">Dis</th>
 				<th width="10%" style="padding:0px !important; border:none;" class="text-right">Qty</th>
                 <th width="10%" style="padding:0px !important; border:none;" class="text-right">Rate</th>
+                <th width="10%" style="padding:0px !important; border:none;" class="text-right">Tax</th>
                 <th width="10%" style="padding:0px !important; border:none;" class="text-right">Amount</th>
             </tr>
             `
@@ -250,6 +251,9 @@ export function defaultOfflineHTML(invoice, terms = "") {
 				<td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.discount_amount}</td>
                 <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.qty}</td>
                 <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.rate}</td>
+                <td width="10%" class="text-right" style="padding:0px !important; border:none;">${
+					it.item_tax_amount ? Number(it.item_tax_amount).toFixed(2) : ""
+				}</td>
                 <td width="10%" class="text-right" style="padding:0px !important; border:none;">${it.amount}</td>
             </tr>
         `;
@@ -324,10 +328,10 @@ hr {
 
     <!-- HEADER INFO -->
     <p>
-        POS No: ${invoice.name}<br>
-        Cashier: ${invoice.owner}<br>
-        Customer: ${invoice.customer || "Walk-in"}<br>
-        Date: ${invoice.posting_date}
+        POS No: ${invoice.name || "Offline / Pending Sync"}<br>
+        Cashier: ${invoice.owner || ""}<br>
+        Customer: ${invoice.customer_name || invoice.customer || "Walk-in"}<br>
+        Date: ${invoice.posting_date || ""}
     </p>
 
     <hr>
@@ -336,12 +340,13 @@ hr {
     <table>
         <thead>
             <tr>
-                <th width="38%">Item</th>
+                <th width="32%">Item</th>
                 <th width="12%">Price</th>
                 <th width="10%">Dis</th>
-                <th width="10%" class="text-right">Qty</th>
+                <th width="8%" class="text-right">Qty</th>
                 <th width="10%" class="text-right">Rate</th>
-                <th width="20%" class="text-right">Amount</th>
+                <th width="10%" class="text-right">Tax</th>
+                <th width="18%" class="text-right">Amount</th>
             </tr>
         </thead>
 
@@ -350,7 +355,7 @@ hr {
 				.map(
 					(item) => `
             <tr>
-                <td colspan="6"><b>${item.item_name}</b></td>
+                <td colspan="7"><b>${item.item_name}</b></td>
             </tr>
 
             <tr>
@@ -359,6 +364,9 @@ hr {
                 <td>${item.discount_amount || 0}</td>
                 <td class="text-right">${item.qty}</td>
                 <td class="text-right">${item.rate}</td>
+                <td class="text-right">${
+					item.item_tax_amount ? Number(item.item_tax_amount).toFixed(2) : ""
+				}</td>
                 <td class="text-right">${item.amount}</td>
             </tr>
             `,
@@ -377,14 +385,30 @@ hr {
         </tr>
 
 		${invoice.taxes
-			?.map(
-				(tax) => `
+			?.map((tax) => {
+				// Per-item tax rows carry no rate of their own — one account head
+				// can cover several rates — so derive the label from the items
+				// instead of printing a misleading "@0%".
+				const rate = parseFloat(tax.rate) || 0;
+				const label = rate
+					? ` @${rate}%`
+					: (() => {
+							const rates = new Set();
+							(invoice.items || []).forEach((item) => {
+								const map = parseTaxRates(item.item_tax_rate);
+								if (map[tax.account_head] !== undefined) {
+									rates.add(parseFloat(map[tax.account_head]) || 0);
+								}
+							});
+							return rates.size === 1 ? ` @${[...rates][0]}%` : "";
+						})();
+				return `
 			<tr>
-				<td>${tax.description || tax.account_head || "Tax"}${tax.rate ? ` @${tax.rate}%` : ""}</td>
+				<td>${tax.description || tax.account_head || "Tax"}${label}</td>
 				<td class="text-right">${tax.tax_amount}</td>
 			</tr>
-		`,
-			)
+		`;
+			})
 			.join("")}
 
         ${
@@ -445,7 +469,21 @@ export default async function renderOfflineInvoiceHTML(invoice) {
 
 	await memoryInitPromise;
 
-	const template = normaliseTemplate(getPrintTemplate());
+	let template = normaliseTemplate(getPrintTemplate());
+
+	// The real print format is cached when the shift opens. If that never ran —
+	// a reload straight into offline, a cleared cache — fetch it now rather than
+	// silently falling back to a receipt that looks nothing like the online one.
+	if (!template && typeof navigator !== "undefined" && navigator.onLine) {
+		try {
+			const { ensurePosProfile } = await import("./utils/pos_profile.js");
+			await ensurePosProfile();
+			template = normaliseTemplate(getPrintTemplate());
+		} catch (e) {
+			console.error("Failed to fetch print format for offline printing", e);
+		}
+	}
+
 	const terms = getTermsAndConditions();
 	const doc = prepareOfflineDoc(invoice, terms);
 	attachFormatter(doc);

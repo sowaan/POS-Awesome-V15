@@ -5,9 +5,10 @@ export async function cachePrintTemplateAndTerms(profile) {
 	if (!profile || typeof frappe === "undefined" || !navigator.onLine) return;
 
 	try {
-		// Online printing prefers print_format_for_online, so cache that same
-		// format for locally-created invoices as well.
-		const printFormat = profile.print_format_for_online || profile.print_format;
+		// Offline printing uses its own format when the profile defines one,
+		// otherwise it falls back to the format used for online printing.
+		const printFormat =
+			profile.posa_offline_print_format || profile.print_format_for_online || profile.print_format;
 		if (printFormat) {
 			const pf = await frappe.call({
 				method: "frappe.client.get_value",

@@ -253,6 +253,7 @@ fixtures = [
                     "Sales Order-posa_coupons",
                     "Sales Order Item-posa_row_id",
                     "POS Profile-posa_tax_inclusive",
+                    "POS Profile-posa_offline_print_format",
                     "POS Profile-posa_apply_fbr_fee",
                     "POS Profile-posa_fbr_fee_rate",
                     "Sales Invoice-posa_apply_fbr_fee",

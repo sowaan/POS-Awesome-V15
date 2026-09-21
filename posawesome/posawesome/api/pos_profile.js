@@ -27,5 +27,12 @@ frappe.ui.form.on("POS Profile", {
 				]
 			};
 		});
+		frm.set_query("posa_offline_print_format", function() {
+			return {
+				filters: [
+					["doc_type", "in", ["POS Invoice", "Sales Invoice"]]
+				]
+			};
+		});
 	},
 });
