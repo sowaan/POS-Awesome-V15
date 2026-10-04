@@ -462,7 +462,7 @@
 					<v-col cols="6" v-if="pos_profile.posa_allow_credit_sale && !invoice_doc.is_return">
 						<v-switch v-model="is_credit_sale" :label="frappe._('Credit Sale?')"></v-switch>
 					</v-col>
-					<v-col cols="6" v-if="pos_profile.posa_apply_fbr_fee && !invoice_doc.is_return">
+					<v-col cols="6" v-if="pos_profile.posa_apply_fbr_fee">
 						<v-switch
 							v-model="apply_fbr_fee"
 							flat
@@ -1058,7 +1058,7 @@ export default {
 		// taxes, so the totals have to be adjusted here or the amount due would
 		// still include a waived fee.
 		on_fbr_fee_toggle(value) {
-			if (!this.invoice_doc || this.invoice_doc.is_return) return;
+			if (!this.invoice_doc) return;
 
 			const rate = this.flt(this.pos_profile.posa_fbr_fee_rate);
 			if (!rate) return;
@@ -1372,7 +1372,7 @@ export default {
 
 			// Carry the cashier's FBR fee choice through to calc_fbr_fee() on the
 			// server, and into the payload saved offline.
-			if (this.pos_profile.posa_apply_fbr_fee && !this.invoice_doc.is_return) {
+			if (this.pos_profile.posa_apply_fbr_fee) {
 				this.invoice_doc.posa_apply_fbr_fee = this.apply_fbr_fee ? 1 : 0;
 			}
 

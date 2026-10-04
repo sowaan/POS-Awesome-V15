@@ -569,8 +569,12 @@ export default {
 					(tax) => tax.charge_type === "Actual" && tax.description === FBR_FEE_DESCRIPTION,
 				);
 				if (!existingFbr) {
-					grandTotal += fbrRate;
-					doc.total_taxes_and_charges = flt(doc.total_taxes_and_charges) + fbrRate;
+					// grandTotal is still a positive magnitude for returns (it is
+					// negated below), and the fee is charged on returns too, so
+					// there it reduces the refund instead of adding to it.
+					const fbrDelta = isReturn ? -fbrRate : fbrRate;
+					grandTotal += fbrDelta;
+					doc.total_taxes_and_charges = flt(doc.total_taxes_and_charges) + fbrDelta;
 					doc.taxes.push({
 						account_head: this.pos_profile.custom_fbr_1_ruppe_gl_account,
 						charge_type: "Actual",
