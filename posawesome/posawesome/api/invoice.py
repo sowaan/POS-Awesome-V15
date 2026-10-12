@@ -280,9 +280,9 @@ def calc_fbr_fee(doc):
         None,
     )
 
-    # The fee is charged on returns too, so it stays positive and reduces
-    # the refund rather than being credited back with the original sale.
-    rate = abs(rate)
+    # Returns carry the fee as a negative charge, like every other amount on
+    # them, and it is reported to FBR that way.
+    rate = -abs(rate) if doc.is_return else abs(rate)
 
     if not apply_fee or not rate:
         if existing:

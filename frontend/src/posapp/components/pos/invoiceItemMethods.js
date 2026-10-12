@@ -569,21 +569,20 @@ export default {
 					(tax) => tax.charge_type === "Actual" && tax.description === FBR_FEE_DESCRIPTION,
 				);
 				if (!existingFbr) {
-					// grandTotal is still a positive magnitude for returns (it is
-					// negated below), and the fee is charged on returns too, so
-					// there it reduces the refund instead of adding to it.
-					const fbrDelta = isReturn ? -fbrRate : fbrRate;
-					grandTotal += fbrDelta;
-					doc.total_taxes_and_charges = flt(doc.total_taxes_and_charges) + fbrDelta;
+					// grandTotal is still a positive magnitude for returns and is
+					// negated below, so adding the fee here makes it -1 on a return.
+					grandTotal += fbrRate;
+					doc.total_taxes_and_charges = flt(doc.total_taxes_and_charges) + fbrRate;
+					const fbrAmount = isReturn ? -fbrRate : fbrRate;
 					doc.taxes.push({
 						account_head: this.pos_profile.custom_fbr_1_ruppe_gl_account,
 						charge_type: "Actual",
 						description: FBR_FEE_DESCRIPTION,
 						rate: 0,
 						included_in_print_rate: 0,
-						tax_amount: fbrRate,
+						tax_amount: fbrAmount,
 						total: grandTotal,
-						base_tax_amount: fbrRate * (this.exchange_rate || 1),
+						base_tax_amount: fbrAmount * (this.exchange_rate || 1),
 						base_total: grandTotal * (this.exchange_rate || 1),
 					});
 				}
@@ -622,6 +621,9 @@ export default {
 			if (doc.base_rounded_total > 0) doc.base_rounded_total = -Math.abs(doc.base_rounded_total);
 			if (doc.total > 0) doc.total = -Math.abs(doc.total);
 			if (doc.base_total > 0) doc.base_total = -Math.abs(doc.base_total);
+			// Read as TotalTaxCharged by the offline FBR payload in offline/sync.js.
+			if (doc.total_taxes_and_charges > 0)
+				doc.total_taxes_and_charges = -Math.abs(doc.total_taxes_and_charges);
 			if (doc.net_total > 0) doc.net_total = -Math.abs(doc.net_total);
 			if (doc.base_net_total > 0) doc.base_net_total = -Math.abs(doc.base_net_total);
 

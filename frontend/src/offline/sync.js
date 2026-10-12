@@ -112,6 +112,9 @@ export async function saveOfflineInvoice(entry, print = false) {
         const totalTaxes = parseFloat(invoice.total_taxes_and_charges || 0);
         const netTotal = parseFloat(invoice.net_total || invoice.grand_total || 0);
         const taxRate = netTotal ? Math.round((totalTaxes / netTotal) * 100) : 0;
+        // Returns go as credit notes with their negative amounts (including the
+        // -1 FBR fee in TotalTaxCharged), matching the online send in fbr_fiscal_bridge.
+        const invoiceType = invoice.is_return ? 3 : 1;
 
         let totalQuantity = 0;
         const items = invoice.items.map(item => {
@@ -133,7 +136,7 @@ export async function saveOfflineInvoice(entry, print = false) {
                 TaxCharged: taxCharged,
                 Discount: 0.0,
                 FurtherTax: 0.0,
-                InvoiceType: 2,
+                InvoiceType: invoiceType === 3 ? 3 : 2,
                 RefUSIN: null
             };
         });
@@ -153,7 +156,7 @@ export async function saveOfflineInvoice(entry, print = false) {
             FurtherTax: 0.0,
             PaymentMode: 1,
             RefUSIN: null,
-            InvoiceType: 1,
+            InvoiceType: invoiceType,
             Items: items
         };
 

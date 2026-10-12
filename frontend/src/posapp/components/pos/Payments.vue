@@ -1060,8 +1060,10 @@ export default {
 		on_fbr_fee_toggle(value) {
 			if (!this.invoice_doc) return;
 
-			const rate = this.flt(this.pos_profile.posa_fbr_fee_rate);
-			if (!rate) return;
+			// Negative on returns, matching calc_fbr_fee() on the server.
+			const fee = this.flt(this.pos_profile.posa_fbr_fee_rate);
+			if (!fee) return;
+			const rate = this.invoice_doc.is_return ? -Math.abs(fee) : Math.abs(fee);
 
 			const taxes = this.invoice_doc.taxes || (this.invoice_doc.taxes = []);
 			const existing = taxes.find(
