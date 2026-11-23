@@ -259,10 +259,14 @@ def get_fbr_fee_settings(pos_profile):
 
 
 def calc_fbr_fee(doc):
-    """Add the fixed FBR fee as the last Actual charge on the invoice."""
-    if not doc.pos_profile:
-        return
+    """Add the fixed FBR fee as the last Actual charge on the invoice.
 
+    The fee only belongs on invoices raised against a POS Profile. Without one
+    (e.g. a plain desk invoice, or the profile was cleared) any fee row that was
+    carried over — by duplicating, mapping or an earlier save — is removed.
+    """
+    # get_fbr_fee_settings returns (0, 0, None) when there is no POS Profile,
+    # so the removal branch below handles that case.
     apply_fee, rate, account = get_fbr_fee_settings(doc.pos_profile)
 
     # The cashier can waive the fee for a single invoice. Only an explicit 0
